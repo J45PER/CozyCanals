@@ -15,7 +15,7 @@ const JOURNEY := [
 	{"name": "Three Ways", "seed": 41, "w": 21, "h": 15, "portals": 3, "derelict": 0.4, "places": 2,
 		"hills": 1, "budget": 1.55, "charm_goal": 18,
 		"blurb": "Three canals meet. Build a junction that links them all."},
-	{"name": "Hartley Flight", "seed": 57, "w": 22, "h": 15, "portals": 2, "derelict": 0.2, "places": 3,
+	{"name": "Hartley Flight", "seed": 62, "w": 22, "h": 15, "portals": 2, "derelict": 0.2, "places": 3,
 		"hills": 2, "river": true, "budget": 1.5, "charm_goal": 20,
 		"blurb": "A proper climb. Go over the top with a flight of locks, or find the long way round."},
 	{"name": "Mill Lane", "seed": 64, "w": 22, "h": 16, "portals": 2, "derelict": 0.3, "places": 2,

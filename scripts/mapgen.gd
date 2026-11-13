@@ -185,9 +185,15 @@ static func _make(p: Dictionary) -> World:
 		var run_on := false
 		for j in range(1, line.size()):
 			ideal[line[j]] = true
+			# Alternate surviving stretches with gaps, in proportion to `share`.
 			if run_left <= 0:
-				run_left = rng.randi_range(3, 6)
-				run_on = rng.randf() < share
+				run_on = not run_on
+				var stretch := rng.randi_range(4, 7)
+				var kept := int(round(stretch * share))
+				run_left = kept if run_on else stretch - kept
+				if run_left <= 0:
+					run_on = not run_on
+					run_left = stretch
 			run_left -= 1
 			var a := line[j - 1]
 			var b := line[j]
