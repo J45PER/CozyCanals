@@ -27,7 +27,7 @@ curve. Once two are joined, narrowboats pass through and each one earns coins.
 | Canal | Drag to dig. Cheap along derelict canal or a river. Climbing a level builds a lock | 12 a step, lock +25 |
 | Path | Drag a footpath from a place to the towpath | 2 a step |
 | Road | Drag a road from a farm to an existing road (later levels) | 6 a step |
-| Trees, Cottage, Cafe, Pub | Add charm. Buildings go beside a canal, path or road | 2 - 50 |
+| Trees, Cottage, Terrace, Shop, Cafe, Pub, Boatyard, Windmill | Add charm. Buildings go beside a canal, path or road; a boatyard needs canal alongside | 2 - 70 |
 | Erase | Removes what you built on a spot and refunds it in full | - |
 
 A path or road that crosses water gets a bridge automatically (+20).
@@ -45,11 +45,22 @@ The Daily Cut also gives a score: stars first, then coins left and charm.
 Every map comes from a seeded generator (`scripts/mapgen.gd`), so a level is
 just a name, a seed and a few settings in `scripts/levels.gd`.
 
+## Artwork
+
+Standing objects (buildings, trees, animals, boats) are PNG sprites in
+`assets/sprites`, with several variants of most buildings. The current set is
+designed and rendered by `tools/make_sprites.js`; see `docs/sprites.png` for
+the whole set. To use your own art, replace a PNG with one of the same name
+(details in `assets/sprites/README.md`).
+
+The ground, water, paths, hedges, bridges and locks are drawn in code, because
+they follow whatever the player draws.
+
 ## Project layout
 
 - `scripts/world.gd` - game state and rules (no rendering, so it is testable)
 - `scripts/mapgen.gd` - map generator; `scripts/autobuild.gd` - solver used for budgets and tests
-- `scripts/world_view.gd` - isometric renderer; `scripts/art.gd` - all artwork, drawn in code
+- `scripts/world_view.gd` - isometric renderer; `scripts/sprites.gd` - sprite loader; `scripts/art.gd` - code-drawn ground and canal structures
 - `scripts/main.gd` - menu, modes, input, camera and HUD
 - `shaders/paper.gdshader` - paper grain and cloud-shadow overlay
 

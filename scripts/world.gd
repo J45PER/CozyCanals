@@ -11,8 +11,8 @@ signal changed
 
 enum T { GRASS, WOOD, ROCK, RIVER, VOID }
 enum L { CANAL, DERELICT, PATH, ROAD }
-enum B { NONE, COTTAGE, CAFE, PUB, CHURCH, FARM }
-enum Tool { PAN, CANAL, PATH, ROAD, TREE, COTTAGE, CAFE, PUB, ERASE }
+enum B { NONE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, CHURCH, FARM, MANOR }
+enum Tool { PAN, CANAL, PATH, ROAD, TREE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, ERASE }
 
 const DIRS8: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1),
@@ -24,10 +24,12 @@ const DREDGE_COST := 4      # restoring derelict canal, or canalising a river
 const LOCK_COST := 25
 const BRIDGE_COST := 20
 const TREE_COST := 2
-const BUILD_COST := {Tool.COTTAGE: 25, Tool.CAFE: 35, Tool.PUB: 50}
-const TOOL_BUILDING := {Tool.COTTAGE: B.COTTAGE, Tool.CAFE: B.CAFE, Tool.PUB: B.PUB}
+const BUILD_COST := {Tool.COTTAGE: 25, Tool.TERRACE: 40, Tool.SHOP: 45, Tool.CAFE: 35, Tool.PUB: 50,
+	Tool.BOATYARD: 60, Tool.WINDMILL: 70}
+const TOOL_BUILDING := {Tool.COTTAGE: B.COTTAGE, Tool.TERRACE: B.TERRACE, Tool.SHOP: B.SHOP, Tool.CAFE: B.CAFE,
+	Tool.PUB: B.PUB, Tool.BOATYARD: B.BOATYARD, Tool.WINDMILL: B.WINDMILL}
 const TOOL_LINK := {Tool.CANAL: L.CANAL, Tool.PATH: L.PATH, Tool.ROAD: L.ROAD}
-const CHARM := {B.COTTAGE: 4, B.CAFE: 6, B.PUB: 8}
+const CHARM := {B.COTTAGE: 4, B.TERRACE: 6, B.SHOP: 7, B.CAFE: 6, B.PUB: 8, B.BOATYARD: 9, B.WINDMILL: 10}
 const LOCK_CHARM := 2
 const BRIDGE_CHARM := 3
 
@@ -282,6 +284,12 @@ func check_place(tool: int, c: Vector2i) -> String:
 			beside = beside or adj.has(c + d)
 		if not beside:
 			return "Build beside a canal, path or road"
+		if tool == Tool.BOATYARD:
+			var waterside := false
+			for d in DIRS8:
+				waterside = waterside or has_canal(c + d)
+			if not waterside:
+				return "A boatyard needs working canal alongside"
 	if not unlimited and cost > coins:
 		return "Not enough coins (%d needed)" % cost
 	return ""

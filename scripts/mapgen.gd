@@ -29,6 +29,12 @@ const PUBS := ["The Navigation", "The Boat Inn", "The Anchor", "The Swan", "The 
 const CHURCHES := ["St Mary's", "St Giles'", "All Saints"]
 const HAMLETS := ["Rose Cottage", "Lock Cottage", "Bramble End", "Orchard Row"]
 const FARMS := ["Home Farm", "Brook Farm", "Hilltop Farm", "Manor Farm"]
+const MILLS := ["Hartley Mill", "Ambleford Mill", "Tower Mill"]
+const MANORS := ["Coombe Hall", "Thistlewick Manor", "The Grange"]
+const SHOPS := ["Village Stores", "The Post Office", "Wharf Stores"]
+## Places that want a footpath, in the order they are handed out.
+const PATH_PLACES := [[B.PUB, PUBS], [B.CHURCH, CHURCHES], [B.COTTAGE, HAMLETS], [B.WINDMILL, MILLS],
+	[B.MANOR, MANORS], [B.SHOP, SHOPS]]
 
 
 ## Generates a finished, solvable map with its starting budget.
@@ -404,12 +410,12 @@ static func _site_places(world: World, rng: RandomNumberGenerator, count: int, a
 				clear = false
 		if not clear:
 			continue
-		var n: int = world.places.size()
 		var kind: int = B.FARM
-		var label: String = FARMS[n % FARMS.size()]
+		var label: String = FARMS[placed % FARMS.size()]
 		if need == L.PATH:
-			kind = [B.PUB, B.CHURCH, B.COTTAGE][placed % 3]
-			label = [PUBS, CHURCHES, HAMLETS][placed % 3][(n / 3 + rng.randi_range(0, 3)) % [PUBS, CHURCHES, HAMLETS][placed % 3].size()]
+			var choice: Array = PATH_PLACES[placed % PATH_PLACES.size()]
+			kind = choice[0]
+			label = choice[1][rng.randi_range(0, choice[1].size() - 1)]
 		world.bld[world.idx(c)] = kind
 		world.bld_fixed[world.idx(c)] = 1
 		world.places.append({"cell": c, "kind": kind, "need": need, "name": label, "ok": false})

@@ -10,6 +10,7 @@ signal boat_arrived
 
 const World := preload("res://scripts/world.gd")
 const Art := preload("res://scripts/art.gd")
+const Sprites := preload("res://scripts/sprites.gd")
 const T := World.T
 const L := World.L
 const B := World.B
@@ -21,12 +22,12 @@ const BASE := 16.0
 
 const CANAL_W := 0.2
 const BOAT_SPEED := 1.5
-const BOAT_LOOKS := [
-	[Color("2f5a48"), Color("a8402f"), Color("e9d9a6")],
-	[Color("2c4466"), Color("c79a3a"), Color("efe3c0")],
-	[Color("7a2f2f"), Color("2d5443"), Color("ecdcae")],
-	[Color("3b4148"), Color("a8402f"), Color("e4dcc4")],
-]
+## Sprite name stem for each kind of building.
+const BUILDING_SPRITE := {
+	B.COTTAGE: "cottage", B.TERRACE: "terrace", B.SHOP: "shop", B.CAFE: "cafe", B.PUB: "pub",
+	B.BOATYARD: "boatyard", B.WINDMILL: "windmill", B.CHURCH: "church", B.FARM: "farm", B.MANOR: "manor",
+}
+const TREES := ["oak_a", "oak_b", "oak_c", "oak_d", "oak_a", "oak_c", "birch_a", "poplar_a", "pine_a", "pine_b"]
 
 var world: World
 var hover := Vector2i(-1, -1)
@@ -47,7 +48,9 @@ var _tp_in := {}
 
 var _terrain: Array = []       # per diagonal: ArrayMesh
 var _linkm: Array = []
-var _objm: Array = []
+var _objm: Array = []           # ground-level props that are still meshes
+var _sprites: Array = []        # per diagonal: [[Texture2D, Rect2], ...]
+var _place_top := {}            # cell -> height of the building sprite on it
 var _smoke: Array = []         # per diagonal: [Vector2] chimney tops
 var _water: Array = []         # per diagonal: [Vector2i] canal cells
 var _over := {}                # cell -> ArrayMesh drawn above boats (bridges, locks)
@@ -60,6 +63,8 @@ var _seen_net := -1
 
 func _ready() -> void:
 	_font = ThemeDB.fallback_font
+	Sprites.ensure_loaded()
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 
 
 func set_world(wd: World) -> void:
@@ -68,7 +73,7 @@ func set_world(wd: World) -> void:
 	_puffs.clear()
 	hover = Vector2i(-1, -1)
 	var rows := world.w + world.h
-	for arr in [_terrain, _linkm, _objm, _smoke, _water, _over_cells]:
+	for arr in [_terrain, _linkm, _objm, _sprites, _smoke, _water, _over_cells]:
 		arr.clear()
 		arr.resize(rows)
 	_over.clear()
@@ -183,9 +188,11 @@ func _bake(d: int, layer: int) -> ArrayMesh:
 			_water[d] = water
 		2:
 			var smoke := []
+			var sprites := []
 			for c in _row(d):
-				_emit_objects(c, mb, smoke)
+				_emit_objects(c, mb, sprites, smoke)
 			_smoke[d] = smoke
+			_sprites[d] = sprites
 	return mb.mesh()
 
 
@@ -204,7 +211,7 @@ func spawn_boat(path: Array[Vector2i], dir_in: Vector2i, dir_out: Vector2i) -> v
 	var cells: Array[Vector2i] = [path[0] + dir_in]
 	cells.append_array(path)
 	cells.append(path[path.size() - 1] + dir_out)
-	_boats.append({"cells": cells, "s": 0.0, "look": randi() % BOAT_LOOKS.size()})
+	_boats.append({"cells": cells, "s": 0.0, "look": randi() % maxi(Sprites.boat_liveries, 1)})
 
 
 func _process(delta: float) -> void:
@@ -596,39 +603,63 @@ func _emit_links(c: Vector2i, mb: Art.MB) -> void:
 
 # --- Baking: standing objects -----------------------------------------------
 
-func _emit_objects(c: Vector2i, mb: Art.MB, smoke: Array) -> void:
+# Queues a sprite with its anchor on the ground at `p` (cell coordinates).
+func _put(sprites: Array, name: String, p: Vector2, z: float) -> void:
+	if Sprites.has(name):
+		sprites.append([Sprites.texture(name), Sprites.rect(name, Art.iso(p, z)), p.x + p.y])
+
+
+func _emit_objects(c: Vector2i, mb: Art.MB, sprites: Array, smoke: Array) -> void:
 	var z := _zc(c)
 	var o := Vector2(c)
-	var kind := world.building(c)
+	var centre := o + Vector2(0.5, 0.5)
 	var seed := c.x * 92821 + c.y * 68917
+	var mine := []
+	var kind := world.building(c)
 	if kind != B.NONE:
-		var top := Art.building(mb, kind, o, z, seed)
-		if top != Vector2.ZERO:
-			smoke.append(top)
+		var name := Sprites.pick(BUILDING_SPRITE[kind], seed / 7)
+		_put(sprites, name, centre, z)
+		if Sprites.has(name):
+			_place_top[c] = Sprites.height(name)
+			var puff := Sprites.smoke(name)
+			if puff != Vector2.ZERO:
+				smoke.append(Art.iso(centre, z) + puff)
 		return
 	for p in world.portals:
 		if p.cell == c:
 			Art.signpost(mb, _label_anchor(p), z)
 	match world.terrain_at(c):
 		T.WOOD:
-			Art.copse(mb, o, z, seed)
+			Art.wood_floor(mb, o, z, seed)
+			var by_water := false
+			for d in World.DIRS4:
+				by_water = by_water or world.has_water(c + d) or _river_dirs.has(c + d)
+			for j in 2 + int(Art.rnd(seed, 0, 60) > 0.4):
+				var p := o + Vector2(0.2 + 0.6 * Art.rnd(seed, j, 61), 0.2 + 0.6 * Art.rnd(seed, j, 71))
+				var pick := int(Art.rnd(seed, j, 81) * TREES.size())
+				_put(mine, "willow_a" if (by_water and j == 0) else TREES[pick], p, z)
 		T.ROCK:
-			Art.outcrop(mb, o, z, seed)
+			_put(mine, Sprites.pick("rock", seed), centre, z)
 		T.GRASS:
-			if world.adj.has(c):
-				return
-			var field: Dictionary = _fields[_cell_field[c]]
-			var roll := Art.rnd(c.x, c.y, 99)
-			if field.kind == 0 and roll > 0.82:
-				Art.livestock(mb, o, z, seed, roll > 0.93)
-			elif field.kind == 3 and roll > 0.6:
-				Art.hay_bale(mb, o + Vector2(0.3 + 0.4 * Art.rnd(c.x, c.y, 5), 0.3 + 0.4 * Art.rnd(c.x, c.y, 6)), z)
-			elif roll < 0.035:
-				Art.oak(mb, o + Vector2(0.5, 0.5), z, 0.9, seed)
-			for seg in _hedges[c]:
-				if not seg[2] and Art.rnd(c.x, c.y, 77) > 0.78:
-					Art.oak(mb, (seg[0] as Vector2).lerp(seg[1], 0.5), z, 0.7, seed + 3)
-					break
+			if not world.adj.has(c):
+				var field: Dictionary = _fields[_cell_field[c]]
+				var roll := Art.rnd(c.x, c.y, 99)
+				if field.kind == 0 and roll > 0.82:
+					var animal := "cow" if roll > 0.93 else "sheep"
+					for j in 1 + int(Art.rnd(seed, 2, 2) > 0.4):
+						_put(mine, Sprites.pick(animal, seed + j), o + Vector2(0.3 + 0.4 * j, 0.35 + 0.3 * Art.rnd(seed, j, 4)), z)
+				elif field.kind == 3 and roll > 0.6:
+					_put(mine, "haybale_a", o + Vector2(0.3 + 0.4 * Art.rnd(c.x, c.y, 5), 0.3 + 0.4 * Art.rnd(c.x, c.y, 6)), z)
+				elif roll < 0.035:
+					_put(mine, Sprites.pick("oak", seed), centre, z)
+				elif roll < 0.07:
+					_put(mine, "bush_a", centre, z)
+				for seg in _hedges[c]:
+					if not seg[2] and Art.rnd(c.x, c.y, 77) > 0.78:
+						_put(mine, "oak_d", (seg[0] as Vector2).lerp(seg[1], 0.5), z)
+						break
+	mine.sort_custom(func(a, b): return a[2] < b[2])
+	sprites.append_array(mine)
 
 
 func _label_anchor(p: Dictionary) -> Vector2:
@@ -687,6 +718,8 @@ func _draw() -> void:
 					draw_mesh(_over[c], null)
 		if _objm[d] != null:
 			draw_mesh(_objm[d], null)
+		for item in (_sprites[d] if _sprites[d] != null else []):
+			draw_texture_rect(item[0], item[1], false)
 		for c: Vector2i in (_over_cells[d] if _over_cells[d] != null else []):
 			draw_mesh(_over[c], null)
 		for p: Vector2 in (_smoke[d] if _smoke[d] != null else []):
@@ -705,86 +738,22 @@ func _glint(c: Vector2i) -> void:
 	draw_line(p + Vector2(-5, 0), p + Vector2(5, 0), Color(1, 1, 1, a), 1.2)
 
 
-func _prism(center: Vector3, dir: Vector2, pts: Array, z0: float, z1: float, side: Color, top: Color) -> void:
-	var perp := Vector2(-dir.y, dir.x)
-	var ground: Array[Vector2] = []
-	for q: Vector2 in pts:
-		ground.append(Vector2(center.x, center.y) + dir * q.x + perp * q.y)
-	var edges := []
-	for i in ground.size():
-		var a := ground[i]
-		var b := ground[(i + 1) % ground.size()]
-		edges.append([a.x + a.y + b.x + b.y, a, b])
-	edges.sort_custom(func(m, n): return m[0] < n[0])
-	for e in edges:
-		var a: Vector2 = e[1]
-		var b: Vector2 = e[2]
-		if absf((b.x - b.y) - (a.x - a.y)) * HW < 0.5:
-			continue   # edge-on to the camera
-		var shade := side.darkened(0.25 * absf((b - a).normalized().x))
-		shade.a = side.a
-		draw_colored_polygon(PackedVector2Array([
-			Art.iso(a, center.z + z0), Art.iso(b, center.z + z0),
-			Art.iso(b, center.z + z1), Art.iso(a, center.z + z1)]), shade)
-	var cap := PackedVector2Array()
-	for q in ground:
-		cap.append(Art.iso(q, center.z + z1))
-	draw_colored_polygon(cap, top)
-
-
 func _draw_boat(st: Dictionary) -> void:
 	var pos: Vector3 = st.pos
 	var dir: Vector2 = st.dir
 	var alpha: float = st.alpha
 	if alpha <= 0.01:
 		return
-	var look: Array = BOAT_LOOKS[st.look]
-	var fade := func(col: Color) -> Color: return Color(col, alpha)
 	var flat := Vector2(pos.x, pos.y)
-	var perp := Vector2(-dir.y, dir.x)
 	pos.z += sin(_t * 2.5 + st.look) * 0.3 - 1.0
-	var at := func(l: float, s: float, z: float) -> Vector2: return Art.iso(flat + dir * l + perp * s, pos.z + z)
-
 	# Wake trailing from the stern.
 	for j in 3:
-		draw_circle(at.call(-0.6 - j * 0.12, 0.0, 1.0), 3.6 - j * 0.8, Color(1, 1, 1, (0.26 - j * 0.07) * alpha))
-
-	# Long, low and narrow: black hull with a pointed bow and rounded stern,
-	# a painted top plank, and a cabin running most of the length.
-	var w := 0.056
-	var hull := [Vector2(-0.54, -w * 0.5), Vector2(-0.5, -w), Vector2(0.36, -w), Vector2(0.47, -w * 0.55),
-		Vector2(0.53, 0.0), Vector2(0.47, w * 0.55), Vector2(0.36, w), Vector2(-0.5, w), Vector2(-0.54, w * 0.5)]
-	_prism(pos, dir, hull, 0.0, 2.2, fade.call(Color("1c1f1e")), fade.call(Color("1c1f1e")))
-	_prism(pos, dir, hull, 2.2, 3.2, fade.call(look[1]), fade.call(Color("8a7a66")))
-	var cw := 0.045
-	var cabin := [Vector2(-0.37, -cw), Vector2(0.29, -cw), Vector2(0.29, cw), Vector2(-0.37, cw)]
-	_prism(pos, dir, cabin, 3.2, 6.8, fade.call(look[0]), fade.call(look[2]))
-
-	# Livery on whichever cabin side faces the camera: a name panel by the
-	# stern, then a row of windows.
-	var side := cw if perp.x + perp.y > 0.0 else -cw
-	if absf(dir.x - dir.y) > 0.25:
-		draw_colored_polygon(PackedVector2Array([at.call(-0.35, side, 3.9), at.call(-0.2, side, 3.9),
-			at.call(-0.2, side, 6.2), at.call(-0.35, side, 6.2)]), fade.call(look[1]))
-		for j in 4:
-			var l := -0.13 + j * 0.105
-			draw_colored_polygon(PackedVector2Array([at.call(l, side, 4.6), at.call(l + 0.055, side, 4.6),
-				at.call(l + 0.055, side, 6.1), at.call(l, side, 6.1)]), fade.call(Color("cfe3e6")))
-		draw_line(at.call(-0.37, side, 6.5), at.call(0.29, side, 6.5), fade.call(look[2]), 1.0)
-
-	# On the roof: a pole, flower tubs and the stove chimney.
-	draw_line(at.call(-0.1, 0.02, 7.2), at.call(0.24, 0.02, 7.2), fade.call(Color("6b5138")), 1.0)
-	for j in 2:
-		draw_circle(at.call(0.16 - j * 0.1, -0.015, 7.6), 1.3, fade.call([Color("d9534a"), Color("f1c84b")][j]))
-	var stack: Vector2 = at.call(-0.26, 0.0, 6.8)
-	draw_line(stack, stack + Vector2(0, -3.5), fade.call(Color("1c1f1e")), 1.8)
-	draw_line(stack + Vector2(0, -2.6), stack + Vector2(0, -3.5), fade.call(Color("d9a441")), 1.8)
-	# Bow fender, and the steerer standing at the tiller on the stern deck.
-	draw_circle(at.call(0.54, 0.0, 2.4), 1.5, fade.call(Color("3a332c")))
-	draw_line(at.call(-0.53, 0.0, 4.6), at.call(-0.43, 0.02, 5.0), fade.call(Color("b9884a")), 1.2)
-	var feet: Vector2 = at.call(-0.43, 0.0, 3.2)
-	draw_line(feet, feet + Vector2(0, -3.6), fade.call(Color("3d5a80")), 2.0)
-	draw_circle(feet + Vector2(0, -4.8), 1.4, fade.call(Color("f1c9a5")))
+		draw_circle(Art.iso(flat - dir * (0.6 + j * 0.12), pos.z + 1.0), 3.6 - j * 0.8, Color(1, 1, 1, (0.26 - j * 0.07) * alpha))
+	# The sprite set has the boat drawn from a ring of headings; use the nearest.
+	var heading := int(round(atan2(dir.y, dir.x) / TAU * Sprites.boat_directions))
+	var name := Sprites.boat(st.look, heading)
+	if Sprites.has(name):
+		draw_texture_rect(Sprites.texture(name), Sprites.rect(name, Art.iso(flat, pos.z)), false, Color(1, 1, 1, alpha))
 
 
 func _plaque(pos: Vector2, text: String, size: int, bg: Color, ink: Color) -> void:
@@ -800,7 +769,7 @@ func _draw_overlays() -> void:
 		for p in world.portals:
 			_plaque(Art.iso(_label_anchor(p), _zc(p.cell) + 30.0), p.name, 12, Color("f6ecd4"), Color("4a3b2e"))
 		for p in world.places:
-			var top := cell_center(p.cell) + Vector2(0, -46.0 if p.kind == B.CHURCH else -34.0)
+			var top := cell_center(p.cell) + Vector2(0, -minf(_place_top.get(p.cell, 34.0), 62.0) - 2.0)
 			var extent := _font.get_string_size(p.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 11)
 			var at := top + Vector2(-extent.x * 0.5, 0)
 			draw_string_outline(_font, at, p.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, 6, Color(0.98, 0.95, 0.86))

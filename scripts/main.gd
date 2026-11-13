@@ -25,8 +25,12 @@ const TOOLS := [
 	[T.ROAD, "Road", "6 a step"],
 	[T.TREE, "Trees", "2"],
 	[T.COTTAGE, "Cottage", "25"],
+	[T.TERRACE, "Terrace", "40"],
+	[T.SHOP, "Shop", "45"],
 	[T.CAFE, "Cafe", "35"],
 	[T.PUB, "Pub", "50"],
+	[T.BOATYARD, "Boatyard", "60"],
+	[T.WINDMILL, "Windmill", "70"],
 	[T.ERASE, "Erase", "refunds"],
 ]
 
@@ -391,7 +395,7 @@ func _fill_done_panel() -> void:
 	if world.places_ok < world.places.size():
 		lines.append("Connect every place for another star.")
 	if world.charm < world.charm_goal:
-		lines.append("Add pubs, cafes, cottages and trees for charm.")
+		lines.append("Add homes, shops, pubs and trees for charm.")
 	if lines.is_empty():
 		lines.append("Every canal linked, every place connected, and charming with it.")
 	if mode == "daily":
@@ -606,7 +610,7 @@ func _build_hud() -> void:
 	var bar := PanelContainer.new()
 	_hud.add_child(bar)
 	_pin(bar, 0.5, 1, Vector2(0, -10))
-	var bar_box := _hbox(bar, 6)
+	var bar_box := _hbox(bar, 2)
 	var clear_style := _box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 12, 4)
 	var hover_style := _box(Color("efe1bd"), Color(0, 0, 0, 0), 12, 4)
 	var on_style := _box(Color("cfe0b8"), Color("7c9f62"), 12, 4)

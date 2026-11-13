@@ -36,11 +36,11 @@ func _run() -> void:
 		world.coins += 500
 		AutoBuild.run(world)
 		# Decorate a little so the player's buildings show up too.
-		var built := {T.PUB: 0, T.CAFE: 0, T.COTTAGE: 0, T.TREE: 0}
+		var built := {T.PUB: 0, T.CAFE: 0, T.COTTAGE: 0, T.TREE: 0, T.TERRACE: 0, T.SHOP: 0, T.BOATYARD: 0, T.WINDMILL: 0}
 		for y in world.h:
 			for x in world.w:
 				for tool in built:
-					if built[tool] < 2 and (x * 3 + y) % 4 == tool % 4 and world.place(tool, Vector2i(x, y)) == "":
+					if built[tool] < 2 and (x * 3 + y) % 5 == tool % 5 and world.place(tool, Vector2i(x, y)) == "":
 						built[tool] += 1
 		await create_timer(9.0).timeout
 		main._done.hide()
