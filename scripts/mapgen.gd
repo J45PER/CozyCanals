@@ -46,7 +46,6 @@ static func generate(params: Dictionary) -> World:
 			trial.recompute()
 			if AutoBuild.run(trial):
 				world.coins = int(ceil(trial.spent * float(p.get("budget", 1.5)) / 10.0)) * 10 + 10
-				world.par = int(ceil(trial.spent * 1.1 / 5.0)) * 5
 				world.recompute()
 				return world
 		p.seed = int(p.seed) + 7919

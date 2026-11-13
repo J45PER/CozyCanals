@@ -34,7 +34,7 @@ A path or road that crosses water gets a bridge automatically (+20).
 
 **Stars:** link every canal; connect every place (the badge over it shows
 whether it wants a path or a road); reach the charm goal.
-**Par:** each map has a par spend. Finish at or under it for a thrifty medal.
+The Daily Cut also gives a score: stars first, then coins left and charm.
 
 ## Modes
 

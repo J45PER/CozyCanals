@@ -55,7 +55,6 @@ var open_ends := {}         # cell -> direction a road or river runs off the map
 
 var coins := 0
 var spent := 0
-var par := 0            # what a sensible solution spends; beat it for the medal
 var unlimited := false
 var allow_roads := false
 var charm_goal := 0
@@ -375,13 +374,8 @@ func stars() -> int:
 	return 1 + int(places_ok == places.size()) + int(charm >= charm_goal)
 
 
-## True once the map is finished without spending more than par.
-func under_par() -> bool:
-	return stars() >= 2 and par > 0 and spent <= par
-
-
 func score() -> int:
-	return stars() * 1000 + maxi(0, par * 2 - spent) + charm * 5
+	return stars() * 1000 + coins + charm * 5
 
 
 func recompute() -> void:

@@ -132,7 +132,7 @@ func _run() -> void:
 	# Other modes start cleanly.
 	main.start_daily()
 	await create_timer(0.3).timeout
-	_expect("daily starts with a budget", main.mode == "daily" and main.world.coins > 0 and main.world.par > 0)
+	_expect("daily starts with a budget", main.mode == "daily" and main.world.coins > 0)
 	main.start_free(3)
 	await create_timer(0.3).timeout
 	_expect("free build is unlimited with roads", main.world.unlimited and _tool(T.ROAD).visible)

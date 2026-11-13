@@ -129,7 +129,15 @@ func _rebuild(budget: int) -> void:
 		for c in (_over_cells[d] if _over_cells[d] != null else []):
 			_over.erase(c)
 		var cells := []
+		var row: Array[Vector2i] = []
 		for c in _row(d):
+			if not _forward(c):
+				row.append(c)
+		if d > 0:
+			for c in _row(d - 1):
+				if _forward(c):
+					row.append(c)
+		for c in row:
 			var mb := Art.MB.new()
 			_emit_over(c, mb)
 			var mesh := mb.mesh()
@@ -137,6 +145,7 @@ func _rebuild(budget: int) -> void:
 				_over[c] = mesh
 				cells.append(c)
 		_over_cells[d] = cells
+	queue_redraw()
 
 
 func _row(d: int) -> Array[Vector2i]:
@@ -233,7 +242,7 @@ func _boat_state(boat: Dictionary) -> Dictionary:
 	var p := p0.lerp(centre, f).lerp(centre.lerp(p1, f), f)
 	var dir := (centre - p0).lerp(p1 - centre, f)
 	dir = b.normalized() if dir.length() < 0.001 else dir.normalized()
-	p += Vector2(-dir.y, dir.x) * 0.07
+	p += Vector2(-dir.y, dir.x) * 0.075
 
 	var lv := func(j: int) -> float: return float(world.height(cells[clampi(j, 1, n - 2)]))
 	var z: float = lv.call(i)
@@ -248,7 +257,7 @@ func _boat_state(boat: Dictionary) -> Dictionary:
 		alpha = 1.0 - smoothstep(0.1, 0.7, f)
 	var other := cells[i - 1] if (f < 0.5 and i > 0) else cells[mini(i + 1, n - 1)]
 	return {"pos": Vector3(p.x, p.y, z * HSTEP), "dir": dir, "alpha": alpha, "cell": cell, "other": other,
-		"look": boat.look}
+		"near": [cells[maxi(i - 1, 0)], cell, cells[mini(i + 1, n - 1)]], "look": boat.look}
 
 
 # --- Projection -------------------------------------------------------------
@@ -642,9 +651,10 @@ func _emit_over(c: Vector2i, mb: Art.MB) -> void:
 		var is_road := not world.link_dirs(c, [L.ROAD]).is_empty()
 		Art.bridge(mb, centre + a * 0.5, centre + b * 0.5, z, is_road, over_river and not world.has_water(c))
 	for pair in world.locks():
-		if pair[0] == c:
-			var dir := Vector2(pair[1] - pair[0])
-			Art.lock(mb, centre + dir * 0.5, dir.normalized(), z, _zc(pair[1]))
+		if pair[1] == c:
+			# The chamber is cut into the upper level, so it is drawn with this cell.
+			var down := Vector2(pair[0] - pair[1])
+			Art.lock(mb, centre + down * 0.5, -down.normalized(), _zc(pair[0]), z)
 
 
 # --- Drawing ----------------------------------------------------------------
@@ -672,7 +682,7 @@ func _draw() -> void:
 			_glint(c)
 		for st in slots.get(d, []):
 			_draw_boat(st)
-			for c: Vector2i in [st.cell, st.other]:
+			for c: Vector2i in st.near:
 				if _over.has(c):
 					draw_mesh(_over[c], null)
 		if _objm[d] != null:
@@ -731,27 +741,50 @@ func _draw_boat(st: Dictionary) -> void:
 	var look: Array = BOAT_LOOKS[st.look]
 	var fade := func(col: Color) -> Color: return Color(col, alpha)
 	var flat := Vector2(pos.x, pos.y)
-	pos.z += sin(_t * 2.5 + st.look) * 0.4 - 1.0
+	var perp := Vector2(-dir.y, dir.x)
+	pos.z += sin(_t * 2.5 + st.look) * 0.3 - 1.0
+	var at := func(l: float, s: float, z: float) -> Vector2: return Art.iso(flat + dir * l + perp * s, pos.z + z)
+
+	# Wake trailing from the stern.
 	for j in 3:
-		var w := flat - dir * (0.42 + j * 0.13)
-		draw_circle(Art.iso(w, pos.z + 1.0), 4.5 - j, Color(1, 1, 1, (0.28 - j * 0.08) * alpha))
-	var hull := [Vector2(-0.4, -0.065), Vector2(0.27, -0.065), Vector2(0.42, 0.0), Vector2(0.27, 0.065), Vector2(-0.4, 0.065)]
-	_prism(pos, dir, hull, 0.0, 3.5, fade.call(Color("1f2a26")), fade.call(look[1]))
-	var cabin := [Vector2(-0.27, -0.048), Vector2(0.2, -0.048), Vector2(0.2, 0.048), Vector2(-0.27, 0.048)]
-	_prism(pos, dir, cabin, 3.5, 8.0, fade.call(look[0]), fade.call(look[2]))
-	# Coach line, roof boxes and flower tubs.
-	var panel := [Vector2(-0.2, -0.05), Vector2(-0.05, -0.05), Vector2(-0.05, 0.05), Vector2(-0.2, 0.05)]
-	_prism(pos, dir, panel, 5.0, 6.6, fade.call(look[1]), fade.call(look[2]))
-	for j in 3:
-		var q := Art.iso(flat + dir * (0.12 - j * 0.1), pos.z + 8.5)
-		draw_circle(q, 1.7, fade.call([Color("d9534a"), Color("f1c84b"), Color("e98bb0")][j]))
-	var sp := Art.iso(flat - dir * 0.2, pos.z + 8.0)
-	draw_line(sp, sp + Vector2(0, -5), fade.call(Color("1f2a26")), 2.2)
-	draw_circle(sp + Vector2(0, -5), 1.4, fade.call(Color("d9a441")))
-	# The steerer at the stern.
-	var helm := Art.iso(flat - dir * 0.34, pos.z + 4.0)
-	draw_line(helm, helm + Vector2(0, -6), fade.call(Color("3d5a80")), 2.5)
-	draw_circle(helm + Vector2(0, -7.5), 1.9, fade.call(Color("f1c9a5")))
+		draw_circle(at.call(-0.6 - j * 0.12, 0.0, 1.0), 3.6 - j * 0.8, Color(1, 1, 1, (0.26 - j * 0.07) * alpha))
+
+	# Long, low and narrow: black hull with a pointed bow and rounded stern,
+	# a painted top plank, and a cabin running most of the length.
+	var w := 0.056
+	var hull := [Vector2(-0.54, -w * 0.5), Vector2(-0.5, -w), Vector2(0.36, -w), Vector2(0.47, -w * 0.55),
+		Vector2(0.53, 0.0), Vector2(0.47, w * 0.55), Vector2(0.36, w), Vector2(-0.5, w), Vector2(-0.54, w * 0.5)]
+	_prism(pos, dir, hull, 0.0, 2.2, fade.call(Color("1c1f1e")), fade.call(Color("1c1f1e")))
+	_prism(pos, dir, hull, 2.2, 3.2, fade.call(look[1]), fade.call(Color("8a7a66")))
+	var cw := 0.045
+	var cabin := [Vector2(-0.37, -cw), Vector2(0.29, -cw), Vector2(0.29, cw), Vector2(-0.37, cw)]
+	_prism(pos, dir, cabin, 3.2, 6.8, fade.call(look[0]), fade.call(look[2]))
+
+	# Livery on whichever cabin side faces the camera: a name panel by the
+	# stern, then a row of windows.
+	var side := cw if perp.x + perp.y > 0.0 else -cw
+	if absf(dir.x - dir.y) > 0.25:
+		draw_colored_polygon(PackedVector2Array([at.call(-0.35, side, 3.9), at.call(-0.2, side, 3.9),
+			at.call(-0.2, side, 6.2), at.call(-0.35, side, 6.2)]), fade.call(look[1]))
+		for j in 4:
+			var l := -0.13 + j * 0.105
+			draw_colored_polygon(PackedVector2Array([at.call(l, side, 4.6), at.call(l + 0.055, side, 4.6),
+				at.call(l + 0.055, side, 6.1), at.call(l, side, 6.1)]), fade.call(Color("cfe3e6")))
+		draw_line(at.call(-0.37, side, 6.5), at.call(0.29, side, 6.5), fade.call(look[2]), 1.0)
+
+	# On the roof: a pole, flower tubs and the stove chimney.
+	draw_line(at.call(-0.1, 0.02, 7.2), at.call(0.24, 0.02, 7.2), fade.call(Color("6b5138")), 1.0)
+	for j in 2:
+		draw_circle(at.call(0.16 - j * 0.1, -0.015, 7.6), 1.3, fade.call([Color("d9534a"), Color("f1c84b")][j]))
+	var stack: Vector2 = at.call(-0.26, 0.0, 6.8)
+	draw_line(stack, stack + Vector2(0, -3.5), fade.call(Color("1c1f1e")), 1.8)
+	draw_line(stack + Vector2(0, -2.6), stack + Vector2(0, -3.5), fade.call(Color("d9a441")), 1.8)
+	# Bow fender, and the steerer standing at the tiller on the stern deck.
+	draw_circle(at.call(0.54, 0.0, 2.4), 1.5, fade.call(Color("3a332c")))
+	draw_line(at.call(-0.53, 0.0, 4.6), at.call(-0.43, 0.02, 5.0), fade.call(Color("b9884a")), 1.2)
+	var feet: Vector2 = at.call(-0.43, 0.0, 3.2)
+	draw_line(feet, feet + Vector2(0, -3.6), fade.call(Color("3d5a80")), 2.0)
+	draw_circle(feet + Vector2(0, -4.8), 1.4, fade.call(Color("f1c9a5")))
 
 
 func _plaque(pos: Vector2, text: String, size: int, bg: Color, ink: Color) -> void:

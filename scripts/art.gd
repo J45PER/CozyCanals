@@ -561,36 +561,42 @@ static func bridge(mb: MB, p0: Vector2, p1: Vector2, z: float, is_road: bool, wo
 
 
 ## A lock between two levels. `mid` is the point where the levels meet and
-## `dir` points uphill; the chamber sits on the lower side.
+## `dir` points uphill. The chamber is cut into the upper level: a stone-edged
+## basin of deep water with tall bottom gates on the drop and top gates above.
 static func lock(mb: MB, mid: Vector2, dir: Vector2, z_low: float, z_high: float) -> void:
 	var side := Vector2(-dir.y, dir.x)
 	if side.x + side.y < 0.0:
 		side = -side
-	var tail := mid - dir * 0.46
+	var head := mid + dir * 0.44
 	var hw := 0.2
-	# Chamber walls rising to the upper level, far side first.
-	for s: float in [-1.0, 1.0]:
-		var a: Vector2 = tail + side * hw * s
-		var b: Vector2 = mid + side * hw * s
-		var a2: Vector2 = tail + side * (hw + 0.09) * s
-		var b2: Vector2 = mid + side * (hw + 0.09) * s
-		if s < 0.0:
-			mb.quad(iso(a, z_low), iso(b, z_low), iso(b, z_high + 1.0), iso(a, z_high + 1.0), STONE.darkened(0.3))
-		else:
-			mb.quad(iso(a2, z_low), iso(b2, z_low), iso(b2, z_high + 1.0), iso(a2, z_high + 1.0), STONE.darkened(0.12))
-		mb.quad(iso(a, z_high + 1.0), iso(b, z_high + 1.0), iso(b2, z_high + 1.0), iso(a2, z_high + 1.0), STONE.lightened(0.06))
-	# Top gate holding back the upper water, bottom gate at the tail.
-	for gate in [[mid, z_high + 4.0], [tail, z_low + 9.0]]:
+	var rim := hw + 0.075
+	# Stone surround, then the chamber: far wall in shadow and water well below.
+	mb.quad(iso(mid - side * rim, z_high), iso(head - side * rim, z_high),
+		iso(head + side * rim, z_high), iso(mid + side * rim, z_high), STONE)
+	mb.quad(iso(mid - side * hw, z_high), iso(head - side * hw, z_high),
+		iso(head + side * hw, z_high), iso(mid + side * hw, z_high), STONE.darkened(0.45))
+	var sink := minf(z_high - z_low, 7.0)
+	mb.quad(iso(mid - side * hw * 0.55, z_high - sink), iso(head - side * hw * 0.55, z_high - sink),
+		iso(head + side * hw, z_high - sink), iso(mid + side * hw, z_high - sink), WATER_EDGE.darkened(0.1))
+	# The drop itself: a stone face with the tall bottom gates closed across it.
+	mb.quad(iso(mid - side * rim, z_low), iso(mid + side * rim, z_low),
+		iso(mid + side * rim, z_high), iso(mid - side * rim, z_high), STONE.darkened(0.2))
+	mb.quad(iso(mid - side * hw, z_low), iso(mid + side * hw, z_low),
+		iso(mid + side * hw, z_high + 2.0), iso(mid - side * hw, z_high + 2.0), TIMBER)
+	mb.line(iso(mid, z_low), iso(mid, z_high + 2.0), 1.0, Color("5a4a3e"))
+	mb.line(iso(mid - side * hw * 0.5, z_high - 3.0), iso(mid - side * hw * 0.5, z_low + 1.0), 1.6, Color(1, 1, 1, 0.5))
+	# Top gates at the head of the chamber.
+	mb.quad(iso(head - side * hw, z_high - 1.0), iso(head + side * hw, z_high - 1.0),
+		iso(head + side * hw, z_high + 3.0), iso(head - side * hw, z_high + 3.0), TIMBER)
+	# Balance beams on both pairs: black with white ends, angled back along the lock side.
+	for gate in [[mid, 1.0], [head, 1.0]]:
 		var g: Vector2 = gate[0]
-		var top: float = gate[1]
-		mb.quad(iso(g - side * hw, z_low), iso(g + side * hw, z_low), iso(g + side * hw, top), iso(g - side * hw, top), TIMBER)
-		mb.line(iso(g - side * hw * 0.3, z_low), iso(g - side * hw * 0.3, top), 1.0, Color("5a4a3e"))
-		mb.line(iso(g + side * hw * 0.4, z_low), iso(g + side * hw * 0.4, top), 1.0, Color("5a4a3e"))
-		# Balance beams: black with white ends.
-		var e0 := iso(g - side * 0.47, top + 2.0)
-		var e1 := iso(g + side * 0.47, top + 2.0)
-		mb.line(e0, e1, 3.2, Color("26211e"))
-		mb.line(e0, e0.lerp(e1, 0.13), 3.2, Color("f4efe2"))
-		mb.line(e1, e1.lerp(e0, 0.13), 3.2, Color("f4efe2"))
-	# Water spilling through the top gate.
-	mb.line(iso(mid - dir * 0.02, z_high - 1.0), iso(mid - dir * 0.02, z_low + 1.0), 2.0, Color(1, 1, 1, 0.55))
+		for s: float in [-1.0, 1.0]:
+			var a := iso(g + side * hw * 0.2 * s, z_high + 4.0)
+			var b := iso(g + side * (rim + 0.13) * s + dir * 0.06, z_high + 4.0)
+			mb.line(a, b, 2.6, Color("26211e"))
+			mb.line(b, b.lerp(a, 0.28), 2.6, Color("f4efe2"))
+	# Bollards on the lockside.
+	for t: float in [0.12, 0.34]:
+		var p := iso(mid + dir * t + side * (rim - 0.025), z_high)
+		mb.line(p, p + Vector2(0, -3.0), 1.8, Color("26211e"))

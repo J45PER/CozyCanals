@@ -92,7 +92,6 @@ var _coins: Label
 var _coin_icon: CoinIcon
 var _goal_stars: Array[StarRow] = []
 var _goal_labels: Array[Label] = []
-var _par: Label
 var _new_land: Button
 var _tool_buttons: Array[ToolButton] = []
 var _toast: PanelContainer
@@ -354,9 +353,6 @@ func _refresh() -> void:
 	_set_goal(2, open and world.charm >= world.charm_goal, "Charm %d / %d" % [world.charm, world.charm_goal])
 	for i in 3:
 		_goal_stars[i].get_parent().visible = not world.unlimited
-	_par.visible = not world.unlimited
-	_par.text = "Spent %d  -  par %d" % [world.spent, world.par]
-	_par.add_theme_color_override("font_color", MUTED if world.spent <= world.par else Color("b0553f"))
 	if world.net_version != _net_version:
 		# The water changed, so boats in transit may no longer have a route.
 		_net_version = world.net_version
@@ -396,8 +392,8 @@ func _fill_done_panel() -> void:
 		lines.append("Connect every place for another star.")
 	if world.charm < world.charm_goal:
 		lines.append("Add pubs, cafes, cottages and trees for charm.")
-	lines.append("Under par - thrifty medal earned!" if world.under_par() else
-		"Par is %d coins; you have spent %d." % [world.par, world.spent])
+	if lines.is_empty():
+		lines.append("Every canal linked, every place connected, and charming with it.")
 	if mode == "daily":
 		lines.append("Today's score: %d   (best %d)" % [world.score(), maxi(world.score(), _daily_score())])
 	_done_text.text = "\n".join(lines)
@@ -417,8 +413,6 @@ func _record_result() -> void:
 	if mode == "journey":
 		var k := str(level_idx)
 		_save.set_value("journey", k, maxi(_save.get_value("journey", k, 0), world.stars()))
-		if world.under_par():
-			_save.set_value("medals", k, true)
 	elif mode == "daily":
 		_save.set_value("daily", _daily_key(), maxi(_daily_score(), world.score()))
 	_save.save(SAVE_PATH)
@@ -607,8 +601,6 @@ func _build_hud() -> void:
 		row.add_child(lbl)
 		_goal_stars.append(star)
 		_goal_labels.append(lbl)
-	_par = _label("", 13, MUTED)
-	stats_box.add_child(_par)
 
 	# Toolbar, bottom centre.
 	var bar := PanelContainer.new()
