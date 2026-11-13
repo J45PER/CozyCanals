@@ -49,27 +49,41 @@ func _run() -> void:
 	var board = main.board
 	var ok := true
 
-	# Drag the canal tool along the whole silted line of level 1.
-	await _tap(_screen(main, Vector2i(1, 3)), _screen(main, Vector2i(5, 3)))
-	ok = ok and board.kind(Vector2i(1, 3)) == K.CANAL and board.kind(Vector2i(4, 3)) == K.CANAL
-	print("drag-dig: ", board.kind(Vector2i(1, 3)) == K.CANAL, " coins=", board.coins)
+	# Drag the canal tool along the silted line at the western end of level 1.
+	await _tap(_screen(main, Vector2i(1, 4)), _screen(main, Vector2i(3, 4)))
+	ok = ok and board.kind(Vector2i(1, 4)) == K.CANAL and board.kind(Vector2i(3, 4)) == K.CANAL
+	print("drag-dig: ", board.kind(Vector2i(3, 4)) == K.CANAL, " coins=", board.coins)
 
 	# Pick the bridge tool from the toolbar, then tap the lane crossing.
 	var bridge_btn: Control = main._tool_buttons[3]
 	await _tap(bridge_btn.global_position + bridge_btn.size * 0.5)
 	ok = ok and main.tool == T.BRIDGE
 	print("toolbar select: ", main.tool == T.BRIDGE)
-	await _tap(_screen(main, Vector2i(6, 3)))
-	ok = ok and board.kind(Vector2i(6, 3)) == K.BRIDGE
-	print("bridge placed: ", board.kind(Vector2i(6, 3)) == K.BRIDGE)
+	await _tap(_screen(main, Vector2i(7, 5)))
+	ok = ok and board.kind(Vector2i(7, 5)) == K.BRIDGE
+	print("bridge placed: ", board.kind(Vector2i(7, 5)) == K.BRIDGE)
 
 	# Taps on the HUD must not build on tiles hidden behind it.
 	var before: int = board.coins
 	await _tap(main._tool_buttons[1].global_position + Vector2(40, 40))
-	ok = ok and board.coins == before
+	ok = ok and board.coins == before and main.tool == T.CANAL
 
-	await _tap(_screen(main, Vector2i(7, 3)), _screen(main, Vector2i(9, 3)))
-	ok = ok and not board.route.is_empty()
-	print("route open: ", not board.route.is_empty())
+	# Finish the line; boats should then start coming through.
+	await _tap(_screen(main, Vector2i(3, 5)), _screen(main, Vector2i(6, 5)))
+	await _tap(_screen(main, Vector2i(8, 5)), _screen(main, Vector2i(9, 5)))
+	await _tap(_screen(main, Vector2i(9, 6)), _screen(main, Vector2i(11, 6)))
+	ok = ok and board.all_linked()
+	print("canals linked: ", board.all_linked())
+
+	# Drag the towpath tool along the canal.
+	await _tap(main._tool_buttons[4].global_position + Vector2(40, 40))
+	await _tap(_screen(main, Vector2i(0, 4)), _screen(main, Vector2i(3, 4)))
+	ok = ok and board.has_towpath(Vector2i(2, 4)) and board.towpath_pct > 0
+	print("towpath laid: ", board.has_towpath(Vector2i(2, 4)), " ", board.towpath_pct, "%")
+
+	var coins: int = board.coins
+	await create_timer(22.0).timeout
+	ok = ok and board.coins > coins and main._done.visible
+	print("boat passed through: ", board.coins > coins, "  panel shown: ", main._done.visible)
 	print("PASS" if ok else "FAIL")
 	quit(0 if ok else 1)

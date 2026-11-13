@@ -26,18 +26,17 @@ func _run() -> void:
 		await create_timer(0.3).timeout
 		await _snap("%s/level%d_start.png" % [out, i + 1])
 		var board = main.board
-		Solver.build(board, Solver.solve(board))
+		Solver.build_all(board)
 		# Decorate a little so buildings and towpaths show up.
 		board.coins += 400
+		for c in board.network.keys():
+			board.apply(T.TOWPATH, c)
 		var built := {T.PUB: 0, T.CAFE: 0, T.COTTAGE: 0}
-		for c in board.route:
-			for d in board.DIRS:
-				board.apply(T.TOWPATH, c + d)
 		for y in board.h:
 			for x in board.w:
 				for tool in built:
 					if built[tool] < 1 and (x + y) % 3 == tool % 3 and board.apply(tool, Vector2i(x, y)) == "":
 						built[tool] += 1
-		await create_timer(4.0).timeout
+		await create_timer(9.0).timeout
 		await _snap("%s/level%d_built.png" % [out, i + 1])
 	quit()

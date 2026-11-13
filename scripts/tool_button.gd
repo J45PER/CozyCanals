@@ -56,7 +56,8 @@ func _draw() -> void:
 			draw_line(c + Vector2(25, 9), c + Vector2(13, 0), Color("b9684c"), 5.0)
 		T.TOWPATH:
 			_diamond(c, 26, 14, Color("a9d488"))
-			draw_line(c + Vector2(-16, 8), c + Vector2(16, -8), Color("e6d2a2"), 8.0)
+			draw_line(c + Vector2(-13, 3), c + Vector2(9, -8), Color("62b6c9"), 7.0)
+			draw_line(c + Vector2(-8, 9), c + Vector2(14, -2), Color("e6d2a2"), 5.0)
 		T.TREE:
 			draw_line(c + Vector2(0, 4), c + Vector2(0, 16), Color("7a5a3c"), 4.0)
 			draw_circle(c + Vector2(-6, 2), 9, Color("5f9a4c"))

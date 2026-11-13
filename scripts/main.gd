@@ -15,6 +15,8 @@ const GOLD := Color("f2b632")
 
 ## Tools that keep building as you drag across tiles.
 const DRAG_TOOLS := [T.CANAL, T.TOWPATH, T.TREE, T.CLEAR]
+const MAX_BOATS := 3
+const BOAT_GAP := 4.0   # seconds between boats setting off
 const TOOLS := [
 	[T.PAN, "Move", "drag map"],
 	[T.CANAL, "Canal", "5 / 15"],
@@ -71,6 +73,8 @@ var _pinch_dist := 0.0
 var _pinch_mid := Vector2.ZERO
 var _was_open := false
 var _celebrated := false
+var _net_version := -1
+var _next_boat := 0.0
 
 var _hud: Control
 var _title: Label
@@ -106,6 +110,7 @@ func load_level(idx: int) -> void:
 	view.set_board(board)
 	_was_open = false
 	_celebrated = false
+	_net_version = -1
 	_done.hide()
 	_title.text = "%d. %s" % [level_idx + 1, board.title]
 	_blurb.text = board.blurb
@@ -122,6 +127,20 @@ func _fit_view() -> void:
 	var s := minf(minf(area.size.x / b.size.x, area.size.y / b.size.y), 1.5)
 	view.scale = Vector2(s, s)
 	view.position = area.get_center() - b.get_center() * s
+
+
+func _process(delta: float) -> void:
+	# Keep a little traffic moving between any portals that are joined up.
+	_next_boat -= delta
+	if _next_boat > 0.0 or board.pairs.is_empty() or view.boat_count() >= MAX_BOATS:
+		return
+	_next_boat = BOAT_GAP
+	var pair: Array = board.pairs.pick_random()
+	if randf() < 0.5:
+		pair = [pair[1], pair[0]]
+	var path := board.path_between(board.portals[pair[0]], board.portals[pair[1]])
+	if path.size() >= 2:
+		view.spawn_boat(path, board.portal_dirs[pair[0]], board.portal_dirs[pair[1]])
 
 
 func _zoom_at(point: Vector2, factor: float) -> void:
@@ -195,7 +214,7 @@ func _use_tool(screen_pos: Vector2, first: bool) -> void:
 	_last_cell = c
 	if not first and tool not in DRAG_TOOLS:
 		return
-	if board.kind(c) == Board.result_kind(tool):
+	if board.kind(c) == Board.result_kind(tool) or (tool == T.TOWPATH and board.has_towpath(c)):
 		return
 	var err := board.apply(tool, c)
 	if err != "":
@@ -213,16 +232,22 @@ func _use_tool(screen_pos: Vector2, first: bool) -> void:
 
 func _refresh() -> void:
 	_coins.text = str(board.coins)
-	var open := not board.route.is_empty()
-	_set_goal(0, open, "Route open" if open else "Join START to END")
+	var open := board.all_linked()
+	_set_goal(0, open, "Canals linked %d / %d" % [board.linked if board.linked > 1 else 0, board.portals.size()])
 	_set_goal(1, open and board.towpath_pct >= Board.TOWPATH_GOAL,
 		"Towpath %d%% / %d%%" % [board.towpath_pct, Board.TOWPATH_GOAL])
 	_set_goal(2, open and board.charm >= board.charm_goal,
 		"Charm %d / %d" % [board.charm, board.charm_goal])
-	view.set_route(board.route)
-	if open and not _was_open:
-		_show_toast("The cut is open - the first boat is away!")
-	_was_open = open
+	view.refresh()
+	if board.net_version != _net_version:
+		# The water changed, so boats in transit may no longer have a route.
+		_net_version = board.net_version
+		view.clear_boats()
+		_next_boat = 0.8
+	var joined := board.linked > 1
+	if joined and not _was_open:
+		_show_toast("Boats are coming through!" if open else "Two canals joined - boats are coming through")
+	_was_open = joined
 	if _done.visible:
 		_fill_done_panel()
 
@@ -236,7 +261,7 @@ func _on_boat_arrived() -> void:
 	board.boat_arrived()
 	_coins.modulate = GOLD
 	create_tween().tween_property(_coins, "modulate", Color.WHITE, 0.8)
-	if not _celebrated:
+	if not _celebrated and board.all_linked():
 		_celebrated = true
 		_fill_done_panel()
 		_done.show()
@@ -246,10 +271,10 @@ func _fill_done_panel() -> void:
 	var stars := board.stars()
 	for i in 3:
 		_done_stars[i].on = i < stars
-	_done_title.text = "A perfect waterway!" if stars == 3 else "The cut is open!"
-	var lines := ["Every boat that arrives earns %d coins." % board.boat_income()]
+	_done_title.text = "A perfect waterway!" if stars == 3 else "The canal is open!"
+	var lines := ["Every boat that passes through earns %d coins." % board.boat_income()]
 	if board.towpath_pct < Board.TOWPATH_GOAL:
-		lines.append("Lay towpath beside the route for another star.")
+		lines.append("Lay towpath along the canal for another star.")
 	if board.charm < board.charm_goal:
 		lines.append("Add pubs, cafes, cottages and trees for charm.")
 	_done_text.text = "\n".join(lines)

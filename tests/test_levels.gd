@@ -10,7 +10,7 @@ const T := Board.Tool
 
 static func tool_for(board: Board, from: Vector2i, to: Vector2i) -> int:
 	var k := board.kind(to)
-	if board.height(from) != board.height(to):
+	if board.height(from) != board.height(to) and board.kind(from) != K.LOCK:
 		return T.LOCK
 	if k == K.LANE:
 		return T.BRIDGE
@@ -19,25 +19,25 @@ static func tool_for(board: Board, from: Vector2i, to: Vector2i) -> int:
 
 static func step_cost(board: Board, from: Vector2i, to: Vector2i) -> int:
 	var k := board.kind(to)
-	if k == -1 or absi(board.height(from) - board.height(to)) > 1:
+	if k == K.VOID or absi(board.height(from) - board.height(to)) > 1:
 		return -1
 	var tool := tool_for(board, from, to)
 	if tool == -1:
 		return 0
-	if k == K.END or k == K.START:
-		return -1
+	if k == K.LOCK:
+		return 0
 	return Board.cost_for(tool, k)
 
 
-## Cheapest route from start to end as a list of cells (Dijkstra).
-static func solve(board: Board) -> Array[Vector2i]:
-	var dist := {board.start: 0}
+## Cheapest way to join two cells, as a list of cells (Dijkstra).
+static func solve(board: Board, from: Vector2i, to: Vector2i) -> Array[Vector2i]:
+	var dist := {from: 0}
 	var prev := {}
-	var open: Array[Vector2i] = [board.start]
+	var open: Array[Vector2i] = [from]
 	while not open.is_empty():
 		open.sort_custom(func(a, b): return dist[a] < dist[b])
 		var c: Vector2i = open.pop_front()
-		if c == board.end:
+		if c == to:
 			break
 		for d in Board.DIRS:
 			var n := c + d
@@ -50,41 +50,63 @@ static func solve(board: Board) -> Array[Vector2i]:
 				if n not in open:
 					open.append(n)
 	var path: Array[Vector2i] = []
-	if not prev.has(board.end):
+	if not prev.has(to):
 		return path
-	var cur := board.end
-	while cur != board.start:
+	var cur := to
+	while cur != from:
 		path.append(cur)
 		cur = prev[cur]
-	path.append(board.start)
+	path.append(from)
 	path.reverse()
 	return path
 
 
-static func build(board: Board, path: Array[Vector2i]) -> bool:
-	for i in range(1, path.size()):
-		var tool := tool_for(board, path[i - 1], path[i])
-		if tool != -1 and board.apply(tool, path[i]) != "":
+## Links every portal to the first one. Returns false if anything was refused.
+static func build_all(board: Board) -> bool:
+	for i in range(1, board.portals.size()):
+		var path := solve(board, board.portals[0], board.portals[i])
+		if path.is_empty():
 			return false
+		for j in range(1, path.size()):
+			var tool := tool_for(board, path[j - 1], path[j])
+			if tool != -1 and board.kind(path[j]) != K.LOCK and board.apply(tool, path[j]) != "":
+				return false
 	return true
 
 
 func _init() -> void:
 	var failed := false
 	for data in Levels.LEVELS:
+		var widths := {}
+		for row in data.tiles + data.heights:
+			widths[row.length()] = true
 		var board := Board.new()
 		board.load_level(data)
-		var ok: bool = board.route.is_empty() and board.charm == 0
-		var path := solve(board)
-		ok = ok and not path.is_empty() and build(board, path)
-		ok = ok and not board.route.is_empty() and board.blocked_steps().is_empty()
-		# Clearing a built tile must refund it in full.
+		var ok: bool = widths.size() == 1 and board.portals.size() >= 2
+		ok = ok and board.linked == 1 and board.charm == 0
+		ok = ok and Vector2i.ZERO not in board.portal_dirs
+		ok = ok and build_all(board) and board.all_linked() and board.blocked_steps().is_empty()
+		var spent: int = data.coins - board.coins
+		# Boats must be able to run between every pair of portals.
+		var n := board.portals.size()
+		ok = ok and board.pairs.size() == n * (n - 1) / 2
+
+		# Towpath along the whole network earns the second star.
+		board.coins += 1000
+		for c in board.network.keys():
+			ok = ok and board.apply(T.TOWPATH, c) == ""
+		ok = ok and board.towpath_pct == 100 and board.stars() >= 2
+
+		# Clearing a built tile refunds it in full, towpath included.
 		var before := board.coins
-		var mid := path[path.size() / 2]
-		if board.is_player_built(mid):
-			var paid := board.paid[mid.y * board.w + mid.x]
-			ok = ok and board.apply(T.CLEAR, mid) == "" and board.coins == before + paid
-		print("%-14s %s  route=%d tiles  coins left=%d of %d" % [
-			data.name, "ok" if ok else "FAIL", path.size(), before, data.coins])
+		for c in board.network.keys():
+			if board.kind(c) == K.CANAL and board.orig[c.y * board.w + c.x] != K.CANAL:
+				var paid := board.paid[c.y * board.w + c.x]
+				ok = ok and paid > Board.TOWPATH_COST
+				ok = ok and board.apply(T.CLEAR, c) == "" and board.coins == before + paid
+				ok = ok and not board.has_towpath(c) and not board.all_linked()
+				break
+		print("%-14s %s  portals=%d  spent=%d of %d" % [
+			data.name, "ok" if ok else "FAIL", n, spent, data.coins])
 		failed = failed or not ok
 	quit(1 if failed else 0)
