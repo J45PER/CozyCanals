@@ -139,12 +139,24 @@ static func hedge(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, fade: fl
 	mb.disc(pb + up * 0.5, 2.6, 3.4, hazed(HEDGE, fade), 8)
 
 
-static func stone_wall(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, fade: float) -> void:
+static func stone_wall(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, fade: float, col := STONE) -> void:
 	var pa := iso(a, za)
 	var pb := iso(b, zb)
 	var up := Vector2(0, -4.0)
-	mb.quad(pa, pb, pb + up, pa + up, hazed(STONE.darkened(0.2), fade))
-	mb.line(pa + up, pb + up, 2.0, hazed(STONE, fade))
+	mb.quad(pa, pb, pb + up, pa + up, hazed(col.darkened(0.2), fade))
+	mb.line(pa + up, pb + up, 2.0, hazed(col, fade))
+
+
+## Post-and-rail or picket fence.
+static func fence(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, col: Color, first_post: bool) -> void:
+	var pa := iso(a, za)
+	var pb := iso(b, zb)
+	for h: float in [2.2, 4.4]:
+		mb.line(pa + Vector2(0, -h), pb + Vector2(0, -h), 0.9, col.darkened(0.1))
+	var n := maxi(1, int(a.distance_to(b) * 5.0))
+	for i in range(0 if first_post else 1, n + 1):
+		var p := pa.lerp(pb, float(i) / n)
+		mb.line(p, p + Vector2(0, -5.6), 1.3, col)
 
 
 static func reeds(mb: MB, p: Vector2, z: float) -> void:

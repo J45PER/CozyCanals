@@ -13,7 +13,8 @@ enum T { GRASS, WOOD, ROCK, RIVER, VOID }
 enum L { CANAL, DERELICT, PATH, ROAD }
 enum B { NONE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, CHURCH, FARM, MANOR }
 enum Tool { PAN, CANAL, PATH, ROAD, TREE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, ERASE,
-	RESTORE, LOCK_BRICK, LOCK_STONE, BRIDGE_BRICK, BRIDGE_STONE, BRIDGE_WOOD }
+	RESTORE, LOCK_BRICK, LOCK_STONE, BRIDGE_BRICK, BRIDGE_STONE, BRIDGE_WOOD,
+	ROAD_WIDE, PATH_TARMAC, PATH_DIRT, ROUNDABOUT, HEDGE_ROW, WALL_ROW, FENCE_ROW }
 
 const DIRS8: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1),
@@ -29,7 +30,23 @@ const BUILD_COST := {Tool.COTTAGE: 25, Tool.TERRACE: 40, Tool.SHOP: 45, Tool.CAF
 	Tool.BOATYARD: 60, Tool.WINDMILL: 70}
 const TOOL_BUILDING := {Tool.COTTAGE: B.COTTAGE, Tool.TERRACE: B.TERRACE, Tool.SHOP: B.SHOP, Tool.CAFE: B.CAFE,
 	Tool.PUB: B.PUB, Tool.BOATYARD: B.BOATYARD, Tool.WINDMILL: B.WINDMILL}
-const TOOL_LINK := {Tool.CANAL: L.CANAL, Tool.PATH: L.PATH, Tool.ROAD: L.ROAD}
+const TOOL_LINK := {Tool.CANAL: L.CANAL, Tool.PATH: L.PATH, Tool.ROAD: L.ROAD,
+	Tool.ROAD_WIDE: L.ROAD, Tool.PATH_TARMAC: L.PATH, Tool.PATH_DIRT: L.PATH}
+## Surface of each path or road tool, and what one length of it costs.
+const TOOL_STYLE := {Tool.PATH: "gravel", Tool.PATH_TARMAC: "tarmac", Tool.PATH_DIRT: "dirt",
+	Tool.ROAD: "lane", Tool.ROAD_WIDE: "carriageway"}
+const STYLE_LINK_COST := {"gravel": 2, "tarmac": 4, "dirt": 1, "lane": 6, "carriageway": 10}
+const STYLE_NAME := {"gravel": "gravel path", "tarmac": "tarmac path", "dirt": "dirt track",
+	"lane": "lane", "carriageway": "road"}
+## Tools that line a path or road with a hedge, wall or fence, and their cost a length.
+const VERGE_TOOLS := {Tool.HEDGE_ROW: "hedge", Tool.WALL_ROW: "wall", Tool.FENCE_ROW: "fence"}
+const VERGE_COST := {"hedge": 3, "wall": 4, "fence": 2}
+const VERGE_CHARM := {"hedge": 1, "wall": 1, "fence": 0}
+const ROUNDABOUT_COST := 30
+const EXIT_COST := 15
+const CLEAR_TREES_COST := 6
+## Share of the cost given back when the player demolishes their own work.
+const DEMOLISH_REFUND := 0.5
 const CHARM := {B.COTTAGE: 4, B.TERRACE: 6, B.SHOP: 7, B.CAFE: 6, B.PUB: 8, B.BOATYARD: 9, B.WINDMILL: 10}
 const LOCK_CHARM := 2
 const STYLE_COST := 10
@@ -59,6 +76,10 @@ var restored := {}    # edge key -> true where derelict canal was restored
 var offsets := {}     # cell -> where in the cell (0..1) its lines meet; centre if absent
 var styles := {}      # cell -> "brick", "stone" or "wood" for a lock or bridge rebuilt by the player
 var style_paid := {}  # cell -> coins spent restyling it
+var link_style := {}  # edge key -> path or road surface ("gravel", "lane", ...)
+var verges := {}      # edge key -> "hedge", "wall" or "fence" lining a path or road
+var roundabouts := {} # cell -> true
+var exits := {}       # edge cell -> [direction, L, style] for a path or road leaving the map
 
 var portals: Array = []     # [{cell, dir, name}] canals running off the map
 var places: Array = []      # [{cell, kind, need, name, ok}] to be connected
@@ -296,7 +317,7 @@ func is_bridge(c: Vector2i) -> bool:
 
 ## What adding a link would involve: {err, cost, lock, restore}.
 ## err is "" if allowed, "same" if the link already exists.
-func check_link(a: Vector2i, b: Vector2i, type: int) -> Dictionary:
+func check_link(a: Vector2i, b: Vector2i, type: int, style := "") -> Dictionary:
 	var r := {"err": "", "cost": 0, "lock": false, "restore": false}
 	if not in_bounds(a) or not in_bounds(b):
 		r.err = "That's off the map"
@@ -308,13 +329,17 @@ func check_link(a: Vector2i, b: Vector2i, type: int) -> Dictionary:
 	var diagonal := d.x != 0 and d.y != 0
 	var cur: int = links.get(key(a, b), -1)
 	if cur == type:
-		r.err = "same"
+		var have: String = link_style.get(key(a, b), "")
+		if type == L.CANAL or style == "" or have == "" or have == style:
+			r.err = "same"
+		else:
+			r.err = "There's a %s here - bulldoze it first" % STYLE_NAME.get(have, "path")
 		return r
 	if cur == L.DERELICT and type == L.CANAL:
 		r.restore = true
 		r.cost = _scaled(DREDGE_COST, diagonal)
 	elif cur != -1:
-		r.err = "Something already runs along here"
+		r.err = "Something already runs along here - bulldoze it first"
 		return r
 	else:
 		if diagonal and link(Vector2i(a.x + d.x, a.y), Vector2i(a.x, a.y + d.y)) != -1:
@@ -328,11 +353,14 @@ func check_link(a: Vector2i, b: Vector2i, type: int) -> Dictionary:
 			if terrain_at(c) == T.ROCK:
 				r.err = "Solid rock - go around"
 				return r
+			if terrain_at(c) == T.WOOD:
+				r.err = "Trees in the way - bulldoze them first"
+				return r
 			if type == L.CANAL and building(c) != B.NONE:
 				r.err = "There's a building in the way"
 				return r
 		var both_river := terrain_at(a) == T.RIVER and terrain_at(b) == T.RIVER
-		var base: int = DREDGE_COST + 1 if (type == L.CANAL and both_river) else LINK_COST[type]
+		var base: int = DREDGE_COST + 1 if (type == L.CANAL and both_river) else STYLE_LINK_COST.get(style, LINK_COST[type])
 		r.cost = _scaled(base, diagonal)
 		if type == L.CANAL and dh == 1:
 			r.lock = true
@@ -356,20 +384,22 @@ static func _scaled(cost: int, diagonal: bool) -> int:
 
 
 ## Adds a link. Returns "" on success, "same" if already there, or a reason.
-func add_link(a: Vector2i, b: Vector2i, type: int) -> String:
-	var r := check_link(a, b, type)
+func add_link(a: Vector2i, b: Vector2i, type: int, style := "") -> String:
+	if style == "" and type == L.PATH:
+		style = "gravel"
+	elif style == "" and type == L.ROAD:
+		style = "lane"
+	var r := check_link(a, b, type, style)
 	if r.err != "":
 		return r.err
 	var k := key(a, b)
 	links[k] = type
+	if type == L.PATH or type == L.ROAD:
+		link_style[k] = style
 	paid[k] = paid.get(k, 0) + r.cost
 	if r.restore:
 		restored[k] = true
 	_spend(r.cost)
-	for c: Vector2i in [a, b]:
-		if terrain[idx(c)] == T.WOOD:
-			terrain[idx(c)] = T.GRASS
-			planted[idx(c)] = 0
 	if type == L.CANAL:
 		net_version += 1
 	recompute()
@@ -389,10 +419,12 @@ func _refund(amount: int) -> void:
 
 
 ## Adds a link that is part of the map itself (cannot be erased).
-func add_fixed_link(a: Vector2i, b: Vector2i, type: int) -> void:
+func add_fixed_link(a: Vector2i, b: Vector2i, type: int, style := "") -> void:
 	var k := key(a, b)
 	links[k] = type
 	fixed[k] = true
+	if style != "":
+		link_style[k] = style
 
 
 ## Why a building or tree can't go here, or "".
@@ -436,45 +468,167 @@ func place(tool: int, c: Vector2i) -> String:
 	return ""
 
 
-## Removes everything the player built on a cell, refunding it in full.
-func erase(c: Vector2i) -> bool:
+## What bulldozing a cell would do: {what, coins} where coins is the refund
+## (positive) or cost (negative), or what = "" if there is nothing to clear.
+func check_bulldoze(c: Vector2i) -> Dictionary:
 	if not in_bounds(c):
-		return false
-	var removed := false
+		return {"what": "", "coins": 0}
+	var back := 0
+	var any := false
+	for e in adj.get(c, []):
+		var k := key(c, e[0])
+		if fixed.has(k) and not restored.has(k):
+			continue
+		back += paid.get(k, 0) + VERGE_COST.get(verges.get(k, ""), 0)
+		any = true
+	if styles.has(c):
+		back += style_paid.get(c, 0)
+		any = true
+	if roundabouts.has(c):
+		back += ROUNDABOUT_COST
+		any = true
+	if exits.has(c):
+		back += EXIT_COST
+		any = true
+	var i := idx(c)
+	if (bld[i] != B.NONE and bld_fixed[i] == 0) or planted[i] == 1:
+		back += cell_paid[i]
+		any = true
+	if any:
+		return {"what": "yours", "coins": int(back * DEMOLISH_REFUND)}
+	if terrain[i] == T.WOOD:
+		return {"what": "trees", "coins": -CLEAR_TREES_COST}
+	if bld[i] != B.NONE:
+		return {"what": "place", "coins": 0}
+	return {"what": "", "coins": 0}
+
+
+## Clears a cell: the player's own work comes down for half its cost back;
+## clearing woodland costs money. Returns "" or why not.
+func bulldoze(c: Vector2i) -> String:
+	var plan := check_bulldoze(c)
+	match plan.what:
+		"":
+			return "Nothing here to bulldoze"
+		"place":
+			return "%s belongs here - it can't be knocked down" % _place_name(c)
+		"trees":
+			if not unlimited and CLEAR_TREES_COST > coins:
+				return "Clearing trees needs %d coins" % CLEAR_TREES_COST
+			terrain[idx(c)] = T.GRASS
+			_spend(CLEAR_TREES_COST)
+			recompute()
+			return ""
 	for e in adj.get(c, []).duplicate():
 		var k := key(c, e[0])
 		if fixed.has(k) and not restored.has(k):
 			continue
-		_refund(paid.get(k, 0))
+		_refund_part(paid.get(k, 0) + VERGE_COST.get(verges.get(k, ""), 0))
 		paid.erase(k)
+		verges.erase(k)
 		if restored.has(k):
 			restored.erase(k)
 			links[k] = L.DERELICT
 		else:
 			links.erase(k)
+			link_style.erase(k)
 		if e[1] == L.CANAL:
 			net_version += 1
-		removed = true
 	if styles.has(c):
-		_refund(style_paid.get(c, 0))
+		_refund_part(style_paid.get(c, 0))
 		styles.erase(c)
 		style_paid.erase(c)
-		removed = true
+	if roundabouts.has(c):
+		_refund_part(ROUNDABOUT_COST)
+		roundabouts.erase(c)
+	if exits.has(c):
+		_refund_part(EXIT_COST)
+		exits.erase(c)
 	var i := idx(c)
 	if (bld[i] != B.NONE and bld_fixed[i] == 0) or planted[i] == 1:
-		_refund(cell_paid[i])
+		_refund_part(cell_paid[i])
 		cell_paid[i] = 0
 		if planted[i] == 1:
 			terrain[i] = T.GRASS
 			planted[i] = 0
 		bld[i] = B.NONE
-		removed = true
-	if removed:
-		recompute()
-		for d in DIRS8 + [Vector2i.ZERO]:
-			if not adj.has(c + d):
-				offsets.erase(c + d)
-	return removed
+	recompute()
+	for d in DIRS8 + [Vector2i.ZERO]:
+		if not adj.has(c + d):
+			offsets.erase(c + d)
+	return ""
+
+
+## Kept for older callers: bulldozes, returning whether anything came down.
+func erase(c: Vector2i) -> bool:
+	var plan := check_bulldoze(c)
+	return plan.what == "yours" and bulldoze(c) == ""
+
+
+func _refund_part(amount: int) -> void:
+	# What was spent stays spent; only part of it comes back.
+	if not unlimited:
+		coins += int(amount * DEMOLISH_REFUND)
+
+
+func _place_name(c: Vector2i) -> String:
+	for p in places:
+		if p.cell == c:
+			return p.name
+	return "This building"
+
+
+## Lines a path or road with a hedge, wall or fence. Returns "", "same" or why not.
+func add_verge(a: Vector2i, b: Vector2i, kind: String) -> String:
+	var t := link(a, b)
+	if t != L.PATH and t != L.ROAD:
+		return "Hedges and walls go along a path or road"
+	var k := key(a, b)
+	if verges.get(k, "") == kind:
+		return "same"
+	if verges.has(k):
+		return "There's already a %s here - bulldoze it first" % verges[k]
+	if not unlimited and VERGE_COST[kind] > coins:
+		return "Not enough coins (%d needed)" % VERGE_COST[kind]
+	verges[k] = kind
+	_spend(VERGE_COST[kind])
+	recompute()
+	return ""
+
+
+## Turns a road junction into a roundabout.
+func add_roundabout(c: Vector2i) -> String:
+	if link_dirs(c, [L.ROAD]).size() < 3:
+		return "Roundabouts go where three or more roads meet"
+	if roundabouts.has(c):
+		return "There's already a roundabout here"
+	if has_water(c):
+		return "Not on a bridge"
+	if not unlimited and ROUNDABOUT_COST > coins:
+		return "Not enough coins (%d needed)" % ROUNDABOUT_COST
+	roundabouts[c] = true
+	_spend(ROUNDABOUT_COST)
+	recompute()
+	return ""
+
+
+## Carries a path or road off the edge of the map from edge cell `c`.
+func add_exit(c: Vector2i, d: Vector2i, type: int, style: String) -> String:
+	if not in_bounds(c) or in_bounds(c + d) or maxi(absi(d.x), absi(d.y)) != 1 or (d.x != 0 and d.y != 0):
+		return "Paths and roads leave the map from its edge"
+	if exits.has(c) or open_ends.has(c):
+		return "Something already leaves the map here"
+	for p in portals:
+		if p.cell == c:
+			return "The canal leaves the map here"
+	if terrain_at(c) == T.WOOD:
+		return "Trees in the way - bulldoze them first"
+	if not unlimited and EXIT_COST > coins:
+		return "Not enough coins (%d needed)" % EXIT_COST
+	exits[c] = [d, type, style]
+	_spend(EXIT_COST)
+	recompute()
+	return ""
 
 
 ## Canal links that step between levels: [[lower cell, upper cell], ...].
@@ -561,6 +715,8 @@ func recompute() -> void:
 	for pair in locks():
 		if not fixed.has(key(pair[0], pair[1])):
 			charm += LOCK_CHARM
+	for k in verges:
+		charm += VERGE_CHARM.get(verges[k], 0)
 	for c in adj:
 		if is_bridge(c):
 			for e in adj[c]:
@@ -571,7 +727,8 @@ func recompute() -> void:
 
 
 # A place wanting a PATH needs a walk (path or road) to working canal.
-# A place wanting a ROAD needs a road to one of the map's own roads.
+# A place wanting a ROAD needs a road to one of the map's own roads, or a
+# road the player has carried off the edge of the map.
 func _place_connected(p: Dictionary) -> bool:
 	var allowed := [L.ROAD] if p.need == L.ROAD else [L.PATH, L.ROAD]
 	var seen := {p.cell: true}
@@ -584,6 +741,8 @@ func _place_connected(p: Dictionary) -> bool:
 			if p.need == L.PATH and has_canal(c):
 				return true
 			if p.need == L.ROAD:
+				if exits.has(c) and exits[c][1] == L.ROAD:
+					return true
 				for e in adj.get(c, []):
 					if e[1] == L.ROAD and fixed.has(key(c, e[0])):
 						return true

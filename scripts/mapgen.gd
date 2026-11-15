@@ -170,7 +170,7 @@ static func _make(p: Dictionary) -> World:
 		taken.append(b.cell)
 		var line := _wander(world, a.cell, b.cell, noise, 500.0 + i * 50.0, false)
 		for j in range(1, line.size()):
-			world.add_fixed_link(line[j - 1], line[j], L.ROAD)
+			world.add_fixed_link(line[j - 1], line[j], L.ROAD, "carriageway")
 		for c in line:
 			if world.terrain[world.idx(c)] != T.RIVER:
 				world.terrain[world.idx(c)] = T.GRASS

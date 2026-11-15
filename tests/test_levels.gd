@@ -32,7 +32,8 @@ func _check(label: String, params: Dictionary) -> bool:
 			for y in world.h:
 				for x in world.w:
 					world.erase(Vector2i(x, y))
-			ok = ok and world.coins == budget and world.links == again.links
+			# Bulldozing gives back half.
+			ok = ok and world.coins < budget and world.coins >= budget - result.cost and world.links == again.links
 			break
 	# A sensible solution fits the budget and earns the first two stars.
 	ok = ok and AutoBuild.run(world) and world.all_linked() and world.stars() >= 2 and world.coins >= 0
@@ -40,11 +41,25 @@ func _check(label: String, params: Dictionary) -> bool:
 	ok = ok and world.pairs.size() == n * (n - 1) / 2
 	var left := world.coins
 	var locks := world.locks().size()
-	# Erasing everything the player built refunds every coin.
+	# Bulldozing everything the player built gives some coins back and
+	# leaves the map as it started; the map's own places can't be knocked down.
 	for y in world.h:
 		for x in world.w:
 			world.erase(Vector2i(x, y))
-	ok = ok and world.coins == budget and world.linked == 1 and world.links == again.links
+	ok = ok and world.coins > left and world.coins < budget and world.linked == 1 and world.links == again.links
+	var place_cell: Vector2i = world.places[0].cell
+	ok = ok and world.bulldoze(place_cell) != "" and world.building(place_cell) != World.B.NONE
+	# Nothing can be built through woodland until it is cleared, which costs.
+	var wood := Vector2i(-1, -1)
+	for y in world.h:
+		for x in world.w:
+			if world.terrain_at(Vector2i(x, y)) == World.T.WOOD and wood.x < 0:
+				wood = Vector2i(x, y)
+	if wood.x >= 0:
+		var n2: Vector2i = wood + Vector2i(1, 0)
+		ok = ok and world.check_link(wood, n2, L.PATH).err.begins_with("Trees")
+		var before := world.coins
+		ok = ok and world.bulldoze(wood) == "" and world.coins == before - World.CLEAR_TREES_COST
 	print("%-16s %s  %dx%d portals=%d places=%d locks=%d budget=%d left=%d  (%d ms)" % [
 		label, "ok" if ok else "FAIL", world.w, world.h, n, world.places.size(),
 		locks, budget, left, ms])
@@ -64,4 +79,41 @@ func _init() -> void:
 	ok = ok and built
 	print("free build       %s  %dx%d" % ["ok" if free.all_linked() else "FAIL", free.w, free.h])
 	ok = ok and free.all_linked()
+
+	# Hedges along a road, a roundabout at a junction, and a road leading off the map.
+	var extras := true
+	var road_cell := Vector2i(-1, -1)
+	for k in free.links:
+		if free.links[k] == L.ROAD:
+			var cells := free.key_cells(k)
+			extras = extras and free.add_verge(cells[0], cells[1], "hedge") == ""
+			extras = extras and free.add_verge(cells[0], cells[1], "wall") != ""
+			for c in cells:
+				if road_cell.x < 0 and free.link_dirs(c, [L.ROAD]).size() == 2 and not free.has_water(c):
+					road_cell = c
+			break
+	if road_cell.x >= 0:
+		for d in World.DIRS4:
+			var n := road_cell + d
+			if free.in_bounds(n) and not free.adj.has(n) and free.terrain_at(n) == World.T.GRASS and free.building(n) == World.B.NONE:
+				extras = extras and free.add_link(road_cell, n, L.ROAD, "lane") == ""
+				break
+		extras = extras and free.add_roundabout(road_cell) == "" and free.roundabouts.has(road_cell)
+	var edge_done := false
+	for y in free.h:
+		for x in free.w:
+			var c := Vector2i(x, y)
+			if edge_done or not free.in_bounds(c) or free.terrain_at(c) != World.T.GRASS or free.open_ends.has(c):
+				continue
+			for d in World.DIRS4:
+				if not free.in_bounds(c + d) and free.in_bounds(c - d):
+					var portal := false
+					for p in free.portals:
+						portal = portal or p.cell == c
+					if not portal and not edge_done:
+						extras = extras and free.add_exit(c, d, L.ROAD, "carriageway") == "" and free.exits.has(c)
+						extras = extras and free.bulldoze(c) == "" and not free.exits.has(c)
+						edge_done = true
+	print("roads extras     %s  roundabout=%s exit=%s" % ["ok" if extras else "FAIL", road_cell.x >= 0, edge_done])
+	ok = ok and extras and edge_done
 	quit(0 if ok else 1)

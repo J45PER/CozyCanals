@@ -48,9 +48,46 @@ func _draw() -> void:
 		T.PATH:
 			_curve(c, Color("c2ab7c"), 7.0)
 			_curve(c, Color("e2cfa3"), 4.5)
+		T.PATH_TARMAC:
+			_curve(c, Color("a7a39a"), 7.0)
+			_curve(c, Color("8b8882"), 5.0)
+		T.PATH_DIRT:
+			_curve(c, Color("8f7656"), 8.0)
+			_curve(c, Color("b39672"), 6.0)
+			_curve(c, Color("8fae62"), 1.5)
 		T.ROAD:
-			_curve(c, Color("8f9a6a"), 14.0)
-			_curve(c, Color("b8ad9c"), 10.0)
+			_curve(c, Color("8f9a6a"), 12.0)
+			_curve(c, Color("a29e95"), 9.0)
+		T.ROAD_WIDE:
+			_curve(c, Color("8f9a6a"), 17.0)
+			_curve(c, Color("7f7d79"), 14.0)
+			for i in range(0, 12, 3):
+				var t0 := i / 12.0
+				var t1 := (i + 1.4) / 12.0
+				var p0 := c + Vector2(-24 + 48 * t0, sin(t0 * TAU) * 7.0 - 2.0 + t0 * 6.0)
+				var p1 := c + Vector2(-24 + 48 * t1, sin(t1 * TAU) * 7.0 - 2.0 + t1 * 6.0)
+				draw_line(p0, p1, Color("f1ece0"), 1.6)
+		T.ROUNDABOUT:
+			draw_line(c + Vector2(-26, 0), c + Vector2(26, 0), Color("7f7d79"), 9.0)
+			draw_line(c + Vector2(0, -18), c + Vector2(0, 18), Color("7f7d79"), 9.0)
+			draw_circle(c, 15.0, Color("7f7d79"))
+			draw_circle(c, 7.5, Color("f1ece0"))
+			draw_circle(c, 6.0, Color("8fb36a"))
+		T.HEDGE_ROW, T.WALL_ROW, T.FENCE_ROW:
+			draw_line(c + Vector2(-26, 2), c + Vector2(26, 2), Color("e2cfa3"), 7.0)
+			for y: float in [-8.0, 11.0]:
+				match tool_id:
+					T.HEDGE_ROW:
+						draw_line(c + Vector2(-24, y), c + Vector2(24, y), Color("557c45"), 7.0)
+						draw_line(c + Vector2(-24, y - 2), c + Vector2(24, y - 2), Color("6f9450"), 3.0)
+					T.WALL_ROW:
+						draw_line(c + Vector2(-24, y), c + Vector2(24, y), Color("a59a82"), 6.0)
+						draw_line(c + Vector2(-24, y - 2.5), c + Vector2(24, y - 2.5), Color("c9bea4"), 2.0)
+					T.FENCE_ROW:
+						draw_line(c + Vector2(-24, y - 1), c + Vector2(24, y - 1), Color("8a6a45"), 1.5)
+						draw_line(c + Vector2(-24, y + 2), c + Vector2(24, y + 2), Color("8a6a45"), 1.5)
+						for x in range(-24, 25, 8):
+							draw_line(c + Vector2(x, y - 4), c + Vector2(x, y + 4), Color("6b5138"), 2.0)
 		T.ERASE:
 			draw_line(c + Vector2(-11, -11), c + Vector2(11, 11), Color("c0553f"), 5.0)
 			draw_line(c + Vector2(11, -11), c + Vector2(-11, 11), Color("c0553f"), 5.0)

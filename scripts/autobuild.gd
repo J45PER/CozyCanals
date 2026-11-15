@@ -36,6 +36,10 @@ static func route(world: World, start: Vector2i, is_goal: Callable, type: int) -
 			var cost := 0.01
 			if r.err == "":
 				cost = r.cost + 0.01
+			elif r.err.begins_with("Trees"):
+				# Woodland can be cleared, at a price.
+				var trees := int(world.terrain_at(c) == World.T.WOOD) + int(world.terrain_at(n) == World.T.WOOD)
+				cost = World.LINK_COST[type] * 1.4 + trees * World.CLEAR_TREES_COST + 0.01
 			elif r.err != "same":
 				continue
 			if not dist.has(n) or dist[c] + cost < dist[n]:
@@ -58,6 +62,9 @@ static func build(world: World, path: Array[Vector2i], type: int) -> bool:
 	for i in range(1, path.size()):
 		# Wander a little, as a hand-drawn line would.
 		var c := path[i]
+		for cell: Vector2i in [path[i - 1], c]:
+			if world.terrain_at(cell) == World.T.WOOD:
+				world.bulldoze(cell)
 		var free := world.can_move_node(c)
 		var err := world.add_link(path[i - 1], c, type)
 		if free and err == "":

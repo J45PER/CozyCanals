@@ -31,10 +31,22 @@ at any time; the + / - / Fit buttons on the right zoom and bring the map back.
 | --- | --- | --- |
 | Restore | Tap or drag along silted old canal to restore that part of it | 4 a length |
 | Waterways | Canal (drag to dig; climbing a level builds a lock), Stone lock, Brick lock (tap a lock to rebuild it) | 12 a step, lock +25, rebuild 10 |
-| Roads & Paths | Path, Road, and Brick, Stone or Footbridge (tap a bridge to rebuild it) | 2 / 6 a step, rebuild 10 |
+| Roads & Paths | Gravel path, Tarmac path, Dirt track, Lane, Road (with a white centre line), Roundabout (tap a junction of 3+ roads), Brick / Stone / Footbridge (tap a bridge to rebuild it) | 1 - 10 a step, roundabout 30, rebuild 10 |
 | Buildings | Cottage, Terrace, Shop, Cafe, Pub, Boatyard, Windmill | 25 - 70 |
-| Nature | Trees | 2 |
-| Bulldoze | Remove anything you built, with a full refund | - |
+| Nature | Trees; Hedgerow, Stone wall, Fence (drag along a path or road to line both sides) | 2; 2 - 4 a length |
+| Bulldoze | Knock down what you built (half the cost back), or clear trees (6) | - |
+
+Nothing is built over anything else: clear trees, or knock down a path,
+before building there. The map's own places can't be knocked down.
+
+Drag a path or road off the edge of the map to lead it away into the
+countryside (15). Cars use the roads, coming and going at the map's own
+roads and at roads you lead off the map, and visit farms connected by road.
+
+Every building stands in its own plot, fenced, hedged or walled to suit it,
+with a gap and a front path or drive on the side its path or road arrives.
+Pubs, shops, cafes, farms, boatyards and manors get a car park once a road
+reaches them.
 
 A path or road that crosses water gets a bridge automatically (+20).
 

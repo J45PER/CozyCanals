@@ -854,7 +854,7 @@ const LIVERIES = [
   { cabin: "#7a2f2f", band: "#2d5443", roof: "#e8d8aa", panel: "#2d5443" },
   { cabin: "#3b4148", band: "#a8402f", roof: "#ddd5bd", panel: "#d9b25a" },
 ];
-const BOAT_DIRS = 16;
+const BOAT_DIRS = 32;
 
 function boat(livery, index) {
   const L = LIVERIES[livery];
@@ -928,7 +928,7 @@ function boat(livery, index) {
   fs.writeFileSync(path.join(OUT, "sprites.json"), JSON.stringify(manifest, null, 1) + "\n");
 
   // Contact sheet for reviewing the set at a glance.
-  const names = Object.keys(manifest.sprites).filter((n) => !n.startsWith("boat_") || n.endsWith("_02") || n.endsWith("_05") || n.endsWith("_08") || n.endsWith("_14"));
+  const names = Object.keys(manifest.sprites).filter((n) => !n.startsWith("boat_") || n.endsWith("_04") || n.endsWith("_10") || n.endsWith("_16") || n.endsWith("_28"));
   const cells = names.map((n) => `<figure><img src="data:image/png;base64,${fs.readFileSync(path.join(OUT, n + ".png")).toString("base64")}" style="height:${Math.min(170, manifest.sprites[n].h * 2.2)}px"><figcaption>${n}</figcaption></figure>`).join("");
   await page.setViewportSize({ width: 1500, height: 900 });
   await page.setContent(`<html><body style="margin:0;padding:16px;background:#9fbc72;font:12px Georgia;color:#33281f">

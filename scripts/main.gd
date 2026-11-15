@@ -8,6 +8,7 @@ const AutoBuild := preload("res://scripts/autobuild.gd")
 const Levels := preload("res://scripts/levels.gd")
 const ToolButton := preload("res://scripts/tool_button.gd")
 const T := World.Tool
+const L := World.L
 
 const INK := Color("4a3b2e")
 const MUTED := Color("85735c")
@@ -27,8 +28,12 @@ const CATEGORIES := [
 		[T.LOCK_STONE, "Stone lock", "rebuild 10"],
 		[T.LOCK_BRICK, "Brick lock", "rebuild 10"]]],
 	["Roads & Paths", T.PATH, [
-		[T.PATH, "Path", "2 a step"],
-		[T.ROAD, "Road", "6 a step"],
+		[T.PATH, "Gravel path", "2 a step"],
+		[T.PATH_TARMAC, "Tarmac path", "4 a step"],
+		[T.PATH_DIRT, "Dirt track", "1 a step"],
+		[T.ROAD, "Lane", "6 a step"],
+		[T.ROAD_WIDE, "Road", "10 a step"],
+		[T.ROUNDABOUT, "Roundabout", "30"],
 		[T.BRIDGE_BRICK, "Brick bridge", "rebuild 10"],
 		[T.BRIDGE_STONE, "Stone bridge", "rebuild 10"],
 		[T.BRIDGE_WOOD, "Footbridge", "rebuild 10"]]],
@@ -36,21 +41,32 @@ const CATEGORIES := [
 		[T.COTTAGE, "Cottage", "25"], [T.TERRACE, "Terrace", "40"], [T.SHOP, "Shop", "45"],
 		[T.CAFE, "Cafe", "35"], [T.PUB, "Pub", "50"], [T.BOATYARD, "Boatyard", "60"],
 		[T.WINDMILL, "Windmill", "70"]]],
-	["Nature", T.TREE, [[T.TREE, "Trees", "2"]]],
-	["Bulldoze", T.ERASE, [[T.ERASE, "Bulldoze", "refunds"]]],
+	["Nature", T.TREE, [
+		[T.TREE, "Trees", "2"],
+		[T.HEDGE_ROW, "Hedgerow", "3 a length"],
+		[T.WALL_ROW, "Stone wall", "4 a length"],
+		[T.FENCE_ROW, "Fence", "2 a length"]]],
+	["Bulldoze", T.ERASE, [[T.ERASE, "Bulldoze", "half back"]]],
 ]
 ## Shown when a tool is picked, so its use is clear.
 const TOOL_HINTS := {
 	T.RESTORE: "Tap or drag along the silted canal to restore it",
 	T.CANAL: "Drag to dig a canal",
-	T.PATH: "Drag a footpath from a place to the towpath",
-	T.ROAD: "Drag a road from a farm to a road",
+	T.PATH: "Drag a footpath from a place to the towpath. Drag off the map's edge to lead it away",
+	T.PATH_TARMAC: "Drag a tarmac path",
+	T.PATH_DIRT: "Drag a dirt track",
+	T.ROAD: "Drag a country lane. Drag off the map's edge to lead it away",
+	T.ROAD_WIDE: "Drag a road with a white line down the middle",
+	T.ROUNDABOUT: "Tap a junction where three or more roads meet",
+	T.HEDGE_ROW: "Drag along a path or road to plant a hedge each side",
+	T.WALL_ROW: "Drag along a path or road to build a dry-stone wall each side",
+	T.FENCE_ROW: "Drag along a path or road to put up a fence each side",
 	T.LOCK_STONE: "Tap a lock to rebuild it in stone",
 	T.LOCK_BRICK: "Tap a lock to rebuild it in Victorian brick",
 	T.BRIDGE_BRICK: "Tap a bridge to rebuild it as a brick humpback",
 	T.BRIDGE_STONE: "Tap a bridge to rebuild it as a stone arch",
 	T.BRIDGE_WOOD: "Tap a bridge to rebuild it as a wooden footbridge",
-	T.ERASE: "Tap anything you built to remove it, with a full refund",
+	T.ERASE: "Tap to knock down what you built (half back) or clear trees (6)",
 }
 const SUPERSAMPLE_PIXELS := 6000000.0   # render budget for smoothing edges
 
@@ -135,6 +151,7 @@ var _stage_vp: SubViewport
 var _stage: Node2D
 var _view_tween: Tween
 var _restored := [0, 0]   # lengths and coins in the current restore stroke
+var _exit_made := false
 var _toast: PanelContainer
 var _toast_label: Label
 var _toast_tween: Tween
@@ -451,6 +468,7 @@ func _begin_stroke(pos: Vector2) -> void:
 	_painting = true
 	_last_cell = Vector2i(-1, -1)
 	_restored = [0, 0]
+	_exit_made = false
 	_use_tool(pos, true)
 
 
@@ -466,8 +484,9 @@ func _finger(screen_pos: Vector2, _c: Vector2i) -> Vector2:
 func _use_tool(screen_pos: Vector2, first: bool) -> void:
 	var c := _cell_under(screen_pos)
 	if not world.in_bounds(c):
+		_try_exit(screen_pos)
 		return
-	if World.TOOL_LINK.has(tool):
+	if World.TOOL_LINK.has(tool) or World.VERGE_TOOLS.has(tool):
 		_draw_line_to(c, _finger(screen_pos, c), first)
 		return
 	if c == _last_cell:
@@ -494,11 +513,26 @@ func _use_tool(screen_pos: Vector2, first: bool) -> void:
 			_show_toast(err)
 		return
 	if tool == T.ERASE:
-		if world.erase(c):
+		if not first:
+			return
+		var plan := world.check_bulldoze(c)
+		var err := world.bulldoze(c)
+		if err == "":
 			view.add_puff(c)
 			view.refresh(c)
-		elif first:
-			_show_toast("Nothing of yours to erase here")
+			_show_toast("Trees cleared for %d coins" % -plan.coins if plan.coins < 0 else "Knocked down - %d coins back" % plan.coins)
+		else:
+			_show_toast(err)
+		return
+	if tool == T.ROUNDABOUT:
+		if not first:
+			return
+		var err := world.add_roundabout(c)
+		if err == "":
+			view.add_puff(c)
+			view.refresh(c)
+		else:
+			_show_toast(err)
 		return
 	if not first and tool != T.TREE:
 		return
@@ -507,6 +541,28 @@ func _use_tool(screen_pos: Vector2, first: bool) -> void:
 		view.add_puff(c)
 		view.refresh(c)
 	elif first:
+		_show_toast(err)
+
+
+# A path or road dragged off the edge of the map carries on into the
+# countryside beyond.
+func _try_exit(screen_pos: Vector2) -> void:
+	if not _painting or _exit_made or _last_cell.x < 0 or not World.TOOL_LINK.has(tool):
+		return
+	var type: int = World.TOOL_LINK[tool]
+	if type != L.PATH and type != L.ROAD:
+		return
+	var f := _finger(screen_pos, _last_cell)
+	var v := f - world.node(_last_cell)
+	var d := Vector2i(signi(roundi(v.x)) if absf(v.x) >= absf(v.y) else 0, signi(roundi(v.y)) if absf(v.y) > absf(v.x) else 0)
+	if d == Vector2i.ZERO or world.in_bounds(_last_cell + d):
+		return
+	_exit_made = true
+	var err := world.add_exit(_last_cell, d, type, World.TOOL_STYLE[tool])
+	if err == "":
+		view.refresh(_last_cell)
+		_show_toast("Leads off the map - traffic can come and go here" if type == L.ROAD else "Leads off the map")
+	else:
 		_show_toast(err)
 
 
@@ -575,19 +631,27 @@ func _end_stroke() -> void:
 
 
 func _draw_link(a: Vector2i, b: Vector2i) -> bool:
+	if World.VERGE_TOOLS.has(tool):
+		var verr := world.add_verge(a, b, World.VERGE_TOOLS[tool])
+		if verr == "" or verr == "same":
+			view.refresh(b)
+			return true
+		_show_toast(verr)
+		return false
 	var type: int = World.TOOL_LINK[tool]
-	var plan := world.check_link(a, b, type)
+	var style: String = World.TOOL_STYLE.get(tool, "")
+	var plan := world.check_link(a, b, type, style)
 	if plan.err == "same":
 		return true
 	if plan.err != "":
 		_show_toast(plan.err)
 		return false
-	world.add_link(a, b, type)
+	world.add_link(a, b, type, style)
 	_stroke_links += 1
 	view.refresh(b)
 	if plan.lock:
 		_show_toast("Lock built to climb the hill")
-	elif plan.cost >= World.BRIDGE_COST + World.LINK_COST[type] and not plan.restore:
+	elif plan.cost >= World.BRIDGE_COST and type != L.CANAL and not plan.restore and world.has_bridge(b if world.has_water(b) else a):
 		_show_toast("Bridge built")
 	return true
 
