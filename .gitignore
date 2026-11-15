@@ -3,3 +3,4 @@
 export/
 *.apk
 *.aab
+!builds/CozyCanals.apk
