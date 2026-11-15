@@ -147,6 +147,16 @@ static func stone_wall(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, fad
 	mb.line(pa + up, pb + up, 2.0, hazed(col, fade))
 
 
+## A pub-garden table with benches and a parasol, at screen point `p`.
+static func picnic_table(mb: MB, p: Vector2, parasol: Color) -> void:
+	mb.disc(p + Vector2(1, 1), 7.0, 3.0, SHADOW, 10)
+	mb.quad(p + Vector2(-6, -1), p + Vector2(4, -4), p + Vector2(6, -3), p + Vector2(-4, 0), Color("8a6a45"))
+	mb.quad(p + Vector2(-5, -4), p + Vector2(3, -7), p + Vector2(5, -6), p + Vector2(-3, -3), Color("a8865a"))
+	mb.quad(p + Vector2(-4, 2), p + Vector2(6, -1), p + Vector2(7, 0), p + Vector2(-3, 3), Color("8a6a45"))
+	mb.line(p + Vector2(0, -5), p + Vector2(0, -16), 1.0, TIMBER)
+	mb.fan(PackedVector2Array([p + Vector2(-8, -14), p + Vector2(0, -19), p + Vector2(8, -14), p + Vector2(0, -12)]), parasol)
+
+
 ## Post-and-rail or picket fence.
 static func fence(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, col: Color, first_post: bool) -> void:
 	var pa := iso(a, za)
@@ -222,12 +232,16 @@ static func bridge(mb: MB, p0: Vector2, p1: Vector2, z: float, is_road: bool, st
 			mb.line(iso(a, z + top_a), iso(b, z + top_b), 1.4, wall)
 			mb.line(iso(a, z), iso(a, z + top_a), 1.4, wall.darkened(0.2))
 			continue
-		mb.quad(iso(a, z), iso(b, z), iso(b, z + top_b), iso(a, z + top_a), wall)
+		# The near wall, with an open arch over the water: below the arch's
+		# curve there is nothing, so a boat underneath shows through.
+		var rise_a := 0.0
+		var rise_b := 0.0
 		if i >= 2 and i <= 5:
-			# The arch opening over the water.
-			var rise_a := sin((i - 2) / 4.0 * PI) * 5.0
-			var rise_b := sin((i - 1) / 4.0 * PI) * 5.0
-			mb.quad(iso(a, z), iso(b, z), iso(b, z + rise_b), iso(a, z + rise_a), Color("2c4a52"))
+			rise_a = sin((i - 2) / 4.0 * PI) * 6.0
+			rise_b = sin((i - 1) / 4.0 * PI) * 6.0
+		mb.quad(iso(a, z + rise_a), iso(b, z + rise_b), iso(b, z + top_b), iso(a, z + top_a), wall)
+		if i >= 2 and i <= 5:
+			mb.line(iso(a, z + rise_a), iso(b, z + rise_b), 1.2, wall.darkened(0.3))
 		mb.line(iso(a, z + top_a), iso(b, z + top_b), 1.6, STONE if style == "brick" else wall.lightened(0.2))
 
 

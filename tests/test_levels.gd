@@ -47,8 +47,14 @@ func _check(label: String, params: Dictionary) -> bool:
 		for x in world.w:
 			world.erase(Vector2i(x, y))
 	ok = ok and world.coins > left and world.coins < budget and world.linked == 1 and world.links == again.links
+	# The map's own buildings can come down too, at a price, and stop being goals.
 	var place_cell: Vector2i = world.places[0].cell
-	ok = ok and world.bulldoze(place_cell) != "" and world.building(place_cell) != World.B.NONE
+	var n_places := world.places.size()
+	var coins_before := world.coins
+	ok = ok and world.bulldoze(place_cell) == "" and world.building(place_cell) == World.B.NONE
+	ok = ok and world.places.size() == n_places - 1 and world.coins == coins_before - World.PLACE_DEMOLISH_COST
+	# Where the canals start can never be cleared.
+	ok = ok and world.check_bulldoze(world.portals[0].cell).what != "place"
 	# Nothing can be built through woodland until it is cleared, which costs.
 	var wood := Vector2i(-1, -1)
 	for y in world.h:

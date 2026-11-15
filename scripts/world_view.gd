@@ -54,6 +54,7 @@ const PLOT := {
 	B.COTTAGE: ["picket", false], B.TERRACE: ["hedge", false], B.SHOP: ["wall", true],
 	B.CAFE: ["picket", true], B.PUB: ["wall", true], B.BOATYARD: ["fence", true],
 	B.WINDMILL: ["hedge", false], B.CHURCH: ["stone", false], B.FARM: ["fence", true], B.MANOR: ["stone", true],
+	B.CARPARK: ["hedge", false], B.GARDEN: ["picket", false],
 }
 ## Sprite name stem for each kind of building.
 const BUILDING_SPRITE := {
@@ -410,7 +411,6 @@ func spawn_boat(path: Array[Vector2i], dir_in: Vector2i, dir_out: Vector2i) -> v
 		cells.append(path[path.size() - 1] + dir_out * k)
 	var track := _track(cells, false)
 	track.look = randi() % maxi(Sprites.boat_liveries, 1)
-	track.side = 0.075            # keep to the right
 	track.speed = BOAT_SPEED
 	_boats.append(track)
 
@@ -462,10 +462,43 @@ func _track(cells: Array[Vector2i], car: bool) -> Dictionary:
 				elif t > 0.7 and i < n - 1:
 					z = lerpf(level, (level + _h(cells[i + 1]) * HSTEP) * 0.5, (t - 0.7) / 0.3)
 				zs.append(z)
+	if not car:
+		pts = _keep_right(pts, cells)
 	var cum := PackedFloat32Array([0.0])
 	for i in range(1, pts.size()):
 		cum.append(cum[i - 1] + pts[i - 1].distance_to(pts[i]))
 	return {"pts": pts, "zs": zs, "cum": cum, "s": 0.0, "i": 0, "look": 0, "side": 0.0, "speed": 1.0}
+
+
+# Boats keep to the right, except past moorings on that side, where they
+# pull over to leave room for the boat tied up there. The offset is smoothed
+# along the track so they ease across.
+func _keep_right(pts: PackedVector2Array, cells: Array[Vector2i]) -> PackedVector2Array:
+	var per_cell := pts.size() / cells.size()
+	var want := PackedFloat32Array()
+	for i in pts.size():
+		var cell: Vector2i = cells[mini(i / maxi(per_cell, 1), cells.size() - 1)]
+		var off := 0.075
+		if world.features.get(cell, "") == "moorings":
+			var a := pts[maxi(i - 1, 0)]
+			var b := pts[mini(i + 1, pts.size() - 1)]
+			var t := (b - a).normalized()
+			var right := Vector2(-t.y, t.x)
+			if right.dot(_towpath_side(cell)) > 0.0:
+				off = -0.06      # moored boat on our right: pass on the left
+		want.append(off)
+	var out := PackedVector2Array()
+	for i in pts.size():
+		var sum := 0.0
+		var n := 0
+		for k in range(maxi(i - 6, 0), mini(i + 7, pts.size())):
+			sum += want[k]
+			n += 1
+		var a := pts[maxi(i - 1, 0)]
+		var b := pts[mini(i + 1, pts.size() - 1)]
+		var t := (b - a).normalized()
+		out.append(pts[i] + Vector2(-t.y, t.x) * (sum / n))
+	return out
 
 
 # Position (x, y, z) at distance s along a track.
@@ -1112,8 +1145,32 @@ func _emit_links(c: Vector2i, mb: Art.MB) -> void:
 	_stroke(mb, c, canal, CANAL_W + 0.05, STONE_NEW.darkened(0.08), false, false, aged, Art.COPING)
 	_stroke(mb, c, canal, CANAL_W + 0.03, Art.WATER_EDGE, false)
 	_stroke(mb, c, canal, CANAL_W, Art.WATER, false)
-	if Art.rnd(c.x, c.y, 44) > 0.75 and canal.size() == 2 and not world.is_bridge(c):
+	if Art.rnd(c.x, c.y, 44) > 0.75 and canal.size() == 2 and not world.is_bridge(c) and not world.features.has(c):
 		Art.lilies(mb, node, z, c.x + c.y * 3)
+	if world.features.get(c, "") == "basin":
+		# Wide water: a round winding hole where boats can turn.
+		var tang := _canal_tangent(c)
+		var across := Vector2(-tang.y, tang.x)
+		for layer in [[0.44, aged.has(true) and aged.count(true) == aged.size(), true], [0.4, false, false], [0.37, false, false]]:
+			var pts := PackedVector2Array()
+			for k in 28:
+				var a := TAU * k / 28.0
+				var q: Vector2 = node + tang * cos(a) * (layer[0] + 0.1) + across * sin(a) * layer[0]
+				pts.append(Art.iso(q, z))
+			var col := Art.WATER
+			if layer[2]:
+				col = BRICK_OLD if layer[1] else STONE_NEW
+			elif layer[0] == 0.4:
+				col = Art.WATER_EDGE
+			mb.fan(pts, col)
+	if world.is_bridge(c):
+		# Shade on the water under the deck.
+		var land := world.link_dirs(c, [L.PATH, L.ROAD])
+		if land.size() > 0:
+			var p0 := _join(c, land[0])
+			var p1 := _join(c, land[1]) if land.size() > 1 else node * 2.0 - p0
+			var w := 0.17 if not world.link_dirs(c, [L.ROAD]).is_empty() else 0.11
+			_band(mb, p0.lerp(p1, 0.3), node, p1.lerp(p0, 0.3), -w, w, z, z, z, Color(0.1, 0.18, 0.2, 0.45))
 
 
 # Canals and roads carrying on into the distance, hazed like the land.
@@ -1175,6 +1232,8 @@ func _line_curve(c: Vector2i, d: Vector2, lines: Array) -> Array:
 
 
 func _emit_land_lines(c: Vector2i, mb: Art.MB) -> void:
+	if world.in_bounds(c) and world.building(c) != B.NONE:
+		return   # paths and roads carry on into the plot (see _emit_plot_ground)
 	var lines := _land_lines(c)
 	if lines.is_empty():
 		return
@@ -1271,6 +1330,55 @@ func _emit_verges(c: Vector2i, mb: Art.MB) -> void:
 					"fence": Art.fence(mb, a, b, ground_z(a), ground_z(b), Color("8a6a45"), i == 0)
 
 
+# The way the canal runs through a cell, and the side its towpath is on.
+func _canal_tangent(c: Vector2i) -> Vector2:
+	var dirs := world.link_dirs(c, [L.CANAL])
+	var portal := _portal_dir(c)
+	if portal != Vector2i.ZERO:
+		dirs.append(portal)
+	if dirs.size() >= 2:
+		return (_join(c, dirs[1]) - _join(c, dirs[0])).normalized()
+	if dirs.size() == 1:
+		return Vector2(dirs[0]).normalized()
+	return Vector2(1, 0)
+
+
+# Unit vector from the canal's middle towards its towpath.
+func _towpath_side(c: Vector2i) -> Vector2:
+	var from := Vector2(_tp_in.get(c, Vector2i.ZERO))
+	var dirs := world.link_dirs(c, [L.CANAL])
+	var portal := _portal_dir(c)
+	if portal != Vector2i.ZERO:
+		dirs.append(portal)
+	var out := Vector2.ZERO
+	for d in dirs:
+		if Vector2(d) != from:
+			out = Vector2(d)
+			break
+	var a := _join(c, Vector2i(from)) if from != Vector2.ZERO else _node(c)
+	var b := _join(c, Vector2i(out)) if out != Vector2.ZERO else _node(c) * 2.0 - a
+	var t := (b - a).normalized()
+	return Vector2(t.y, -t.x)   # the band's "left", where the towpath runs
+
+
+# Bollards on the towpath and a boat tied up alongside.
+func _emit_moorings(c: Vector2i, mb: Art.MB, sprites: Array) -> void:
+	var node := _node(c)
+	var t := _canal_tangent(c)
+	var side := _towpath_side(c)
+	var z := _zc(c)
+	for k: float in [-0.3, 0.0, 0.3]:
+		var p := node + t * k + side * 0.29
+		var base := Art.iso(p, z)
+		mb.line(base, base + Vector2(0, -3.4), 2.2, Color("26211e"))
+		mb.disc(base + Vector2(0, -3.4), 1.6, 0.9, Color("3a332c"), 8)
+	var heading := int(round(atan2(t.y, t.x) / TAU * Sprites.boat_directions))
+	var name := Sprites.boat((c.x * 7 + c.y) % maxi(Sprites.boat_liveries, 1), heading)
+	var at := node + side * 0.11
+	if Sprites.has(name):
+		sprites.append([Sprites.texture(name), Sprites.rect(name, Art.iso(at, z - 1.0)), at.x + at.y, Color.WHITE])
+
+
 # --- Building plots -----------------------------------------------------------
 
 # Which side of a building its entrance faces: towards the path or road that
@@ -1295,20 +1403,81 @@ func _has_road(c: Vector2i) -> bool:
 
 
 # Lawn or yard, the front path or drive, and the car park, all lying flat.
+# Plots side by side join into one when one of them is an add-on (a car park
+# or beer garden) or they are the same kind of building, like a row of
+# terraces: no boundary between them and one continuous surface.
+func _merges(c: Vector2i, n: Vector2i) -> bool:
+	if not world.in_bounds(n):
+		return false
+	var a := world.building(c)
+	var b := world.building(n)
+	if a == B.NONE or b == B.NONE:
+		return false
+	return a in World.ADDONS or b in World.ADDONS or a == b
+
+
+# The plot's corners, reaching right to the edge on sides that merge.
+func _plot_rect(c: Vector2i) -> Array:
+	var o := Vector2(c)
+	var lo := Vector2(0.0 if _merges(c, c + Vector2i(-1, 0)) else 0.06, 0.0 if _merges(c, c + Vector2i(0, -1)) else 0.06)
+	var hi := Vector2(1.0 if _merges(c, c + Vector2i(1, 0)) else 0.94, 1.0 if _merges(c, c + Vector2i(0, 1)) else 0.94)
+	return [o + lo, o + hi]
+
+
+func _door(c: Vector2i) -> Vector2:
+	var o := Vector2(c)
+	if world.building(c) in World.ADDONS:
+		return o + Vector2(0.5, 0.5)
+	return o + (Vector2(0.78, 0.5) if _entrance(c).x != 0 else Vector2(0.5, 0.78))
+
+
+func _next_to(c: Vector2i, kind: int) -> bool:
+	for d in World.DIRS4:
+		if world.building(c + d) == kind:
+			return true
+	return false
+
+
+# Lawn, yard or car park, with every path and road that reaches the plot
+# carried on in to the door.
 func _emit_plot_ground(c: Vector2i, mb: Art.MB) -> void:
 	var kind := world.building(c)
 	var o := Vector2(c)
-	var yard := kind == B.FARM or kind == B.BOATYARD
-	_flat_quad(mb, o + Vector2(0.06, 0.06), o + Vector2(0.94, 0.94), Color("cfc39f") if yard else Color("a9c97b"))
-	var e := _entrance(c)
-	var flip := e.x != 0
-	var door := o + (Vector2(0.78, 0.5) if flip else Vector2(0.5, 0.78))
-	var gate := o + Vector2(0.5, 0.5) + Vector2(e) * 0.5
-	var drive := _has_road(c)
-	if Vector2(e).dot(door - (o + Vector2(0.5, 0.5))) > 0.0:
-		var hw := 0.075 if drive else 0.04
-		_band(mb, door, (door + gate) * 0.5, gate, -hw, hw, 0, 0, 0, Color("8b8882") if drive else Color("e2cfa3"), true)
-	if PLOT[kind][1] and drive:
+	var rect := _plot_rect(c)
+	var surface := Color("a9c97b")
+	if kind == B.FARM or kind == B.BOATYARD:
+		surface = Color("cfc39f")
+	elif kind == B.CARPARK:
+		surface = Color("8b8882")
+	_flat_quad(mb, rect[0], rect[1], surface)
+	var door := _door(c)
+	for e in world.adj.get(c, []):
+		if e[1] != L.PATH and e[1] != L.ROAD:
+			continue
+		var d: Vector2i = e[0] - c
+		var st: Dictionary = LINE_STYLE[world.link_style.get(world.key(c, e[0]), "lane" if e[1] == L.ROAD else "gravel")]
+		var j := _join(c, d)
+		var inner := j.lerp(o + Vector2(0.5, 0.5), 0.3)
+		_band(mb, j, inner, door, -st.edge, st.edge, 0, 0, 0, st.edge_col, true)
+		_band(mb, j, inner, door, -st.w, st.w, 0, 0, 0, st.col, true)
+	if world.adj.get(c, []).is_empty() and kind not in World.ADDONS:
+		# No path yet: a short front path towards the way in.
+		var e := _entrance(c)
+		var gate := o + Vector2(0.5, 0.5) + Vector2(e) * 0.5
+		if Vector2(e).dot(door - (o + Vector2(0.5, 0.5))) > 0.0:
+			_band(mb, door, (door + gate) * 0.5, gate, -0.04, 0.04, 0, 0, 0, Color("e2cfa3"), true)
+	if kind == B.CARPARK:
+		# Parking bays.
+		for i in 4:
+			var u := 0.2 + i * 0.2
+			var a := o + Vector2(u, 0.12)
+			var b := o + Vector2(u, 0.32)
+			mb.line(Art.iso(a, ground_z(a) + 0.8), Art.iso(b, ground_z(b) + 0.8), 1.0, Color("f1ece0"))
+			a = o + Vector2(u, 0.68)
+			b = o + Vector2(u, 0.88)
+			mb.line(Art.iso(a, ground_z(a) + 0.8), Art.iso(b, ground_z(b) + 0.8), 1.0, Color("f1ece0"))
+	elif PLOT[kind][1] and _has_road(c) and not _next_to(c, B.CARPARK):
+		var flip := _entrance(c).x != 0
 		var a := o + Vector2(0.08, 0.6)
 		var b := o + Vector2(0.34, 0.92)
 		if flip:
@@ -1324,7 +1493,9 @@ func _flat_quad(mb: Art.MB, a: Vector2, b: Vector2, col: Color) -> void:
 	mb.fan(pts, col)
 
 
-# The plot's boundary, with a gap at the entrance, and cars in the car park.
+# The plot's boundary, with gaps where paths and roads come in, none where
+# it joins a neighbouring plot, and what stands in the plot: parked cars,
+# tables and parasols.
 func _emit_plot_standing(c: Vector2i, mb: Art.MB) -> void:
 	var kind := world.building(c)
 	var o := Vector2(c)
@@ -1334,26 +1505,65 @@ func _emit_plot_standing(c: Vector2i, mb: Art.MB) -> void:
 		[Vector2(0.05, 0.95), Vector2(0.95, 0.95), Vector2i(0, 1)],
 		[Vector2(0.05, 0.05), Vector2(0.05, 0.95), Vector2i(-1, 0)]]
 	var style: String = PLOT[kind][0]
+	var no_links: bool = world.adj.get(c, []).is_empty()
 	for edge in edges:
+		var side: Vector2i = edge[2]
+		if _merges(c, c + side):
+			continue
 		var a: Vector2 = o + edge[0]
 		var b: Vector2 = o + edge[1]
-		var parts := [[a, b]]
-		if edge[2] == e:
-			parts = [[a, a.lerp(b, 0.36)], [a.lerp(b, 0.64), b]]
-		elif world.adj.has(c + edge[2]) and world.link(c, c + edge[2]) != -1:
-			continue
+		# Gaps: where a link crosses this side, or mid-side facing the way in.
+		var gaps := []
+		for l in world.adj.get(c, []):
+			var d: Vector2i = l[0] - c
+			if d == side:
+				var j := _join(c, d)
+				var t := (j - a).dot(b - a) / (b - a).length_squared()
+				gaps.append([t - 0.17, t + 0.17])
+			elif d.x != 0 and d.y != 0 and (d.x == side.x or d.y == side.y):
+				# A diagonal link cuts the corner it heads for.
+				var corner := o + Vector2(0.5, 0.5) + Vector2(d) * 0.5
+				gaps.append([0.75, 1.1] if corner.distance_to(b) < corner.distance_to(a) else [-0.1, 0.25])
+		if no_links and side == e and kind not in World.ADDONS:
+			gaps.append([0.36, 0.64])
+		var parts := [[0.0, 1.0]]
+		for g in gaps:
+			var next := []
+			for part in parts:
+				if g[1] <= part[0] or g[0] >= part[1]:
+					next.append(part)
+					continue
+				if g[0] > part[0]:
+					next.append([part[0], g[0]])
+				if g[1] < part[1]:
+					next.append([g[1], part[1]])
+			parts = next
 		for part in parts:
-			var p: Vector2 = part[0]
-			var q: Vector2 = part[1]
+			if part[1] - part[0] < 0.05:
+				continue
+			var p: Vector2 = a.lerp(b, part[0])
+			var q: Vector2 = a.lerp(b, part[1])
 			match style:
 				"hedge": Art.hedge(mb, p, q, ground_z(p), ground_z(q), 0.0)
 				"wall": Art.stone_wall(mb, p, q, ground_z(p), ground_z(q), 0.0, Color("b0604a"))
 				"stone": Art.stone_wall(mb, p, q, ground_z(p), ground_z(q), 0.0)
 				"picket": Art.fence(mb, p, q, ground_z(p), ground_z(q), Color("f1ece0"), true)
 				"fence": Art.fence(mb, p, q, ground_z(p), ground_z(q), Color("8a6a45"), true)
-	if PLOT[kind][1] and _has_road(c):
+	var seed := c.x * 31 + c.y * 17
+	if kind == B.CARPARK:
+		for i in 3:
+			var row := i % 2
+			var at := o + Vector2(0.3 + 0.2 * (i + seed % 2), 0.22 if row == 0 else 0.78)
+			if Art.rnd(c.x, c.y, i + 3) < 0.25:
+				continue
+			for poly in _car_shape(at, Vector2(0, 1), ground_z(at), CAR_COLOURS[(seed + i) % CAR_COLOURS.size()]):
+				mb.fan(poly[0], poly[1])
+	elif kind == B.GARDEN:
+		for i in 3:
+			var at := o + Vector2(0.27 + 0.23 * i, 0.3 + 0.2 * (i % 2))
+			Art.picnic_table(mb, Art.iso(at, ground_z(at)), [Color("d4604c"), Color("3f7a55"), Color("f1c84b")][(seed + i) % 3])
+	elif PLOT[kind][1] and _has_road(c) and not _next_to(c, B.CARPARK):
 		var flip := e.x != 0
-		var seed := c.x * 31 + c.y * 17
 		for i in 2:
 			var at := o + (Vector2(0.21, 0.69 + i * 0.15) if not flip else Vector2(0.69 + i * 0.15, 0.21))
 			var heading := Vector2(1, 0) if not flip else Vector2(0, 1)
@@ -1428,6 +1638,8 @@ func _emit_standing(c: Vector2i, mb: Art.MB, sprites: Array, smoke: Array) -> vo
 				Art.hedge(mb, seg[0], seg[1], za, zb, fade)
 	if world.in_bounds(c):
 		_emit_verges(c, mb)
+		if world.features.get(c, "") == "moorings":
+			_emit_moorings(c, mb, sprites)
 	if _river_dirs.has(c) and Art.rnd(c.x, c.y, 8) > 0.4:
 		Art.reeds(mb, _node(c, true) + Vector2(-0.2, -0.18), z)
 
@@ -1437,6 +1649,8 @@ func _emit_standing(c: Vector2i, mb: Art.MB, sprites: Array, smoke: Array) -> vo
 		var kind := world.building(c)
 		if kind != B.NONE:
 			_emit_plot_standing(c, mb)
+			if not BUILDING_SPRITE.has(kind):
+				return
 			# The door faces the entrance: sprites face +y, mirrored they face +x.
 			var flip := _entrance(c).x != 0
 			var name := Sprites.pick(BUILDING_SPRITE[kind], seed / 7)

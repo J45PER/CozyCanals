@@ -30,18 +30,23 @@ at any time; the + / - / Fit buttons on the right zoom and bring the map back.
 | Category | Tools | Cost |
 | --- | --- | --- |
 | Restore | Tap or drag along silted old canal to restore that part of it | 4 a length |
-| Waterways | Canal (drag to dig; climbing a level builds a lock), Stone lock, Brick lock (tap a lock to rebuild it) | 12 a step, lock +25, rebuild 10 |
+| Waterways | Canal (drag to dig; climbing a level builds a lock), Moorings, Wide water (a winding hole), Stone lock, Brick lock (tap a lock to rebuild it) | 12 a step, lock +25, moorings 10, wide water 25, rebuild 10 |
 | Roads & Paths | Gravel path, Tarmac path, Dirt track, Lane, Road (with a white centre line), Roundabout (tap a junction of 3+ roads), Brick / Stone / Footbridge (tap a bridge to rebuild it) | 1 - 10 a step, roundabout 30, rebuild 10 |
-| Buildings | Cottage, Terrace, Shop, Cafe, Pub, Boatyard, Windmill | 25 - 70 |
+| Buildings | Cottage, Terrace, Shop, Cafe, Pub, Boatyard, Windmill, Car park, Beer garden | 15 - 70 |
 | Nature | Trees; Hedgerow, Stone wall, Fence (drag along a path or road to line both sides) | 2; 2 - 4 a length |
-| Bulldoze | Knock down what you built (half the cost back), or clear trees (6) | - |
+| Bulldoze | Knock down what you built (half the cost back), clear trees (6), or knock down one of the map's buildings (40; it stops being a goal) | - |
 
 Nothing is built over anything else: clear trees, or knock down a path,
-before building there. The map's own places can't be knocked down.
+before building there. Anything can be knocked down except where the map's
+canals and roads start and end.
 
 Drag a path or road off the edge of the map to lead it away into the
 countryside (15). Cars use the roads, coming and going at the map's own
 roads and at roads you lead off the map, and visit farms connected by road.
+
+Paths and roads run into a building's plot and up to its door. A car park or
+beer garden put next to a building joins its plot, as do neighbouring
+buildings of the same kind (a row of terraces).
 
 Every building stands in its own plot, fenced, hedged or walled to suit it,
 with a gap and a front path or drive on the side its path or road arrives.

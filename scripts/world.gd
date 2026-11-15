@@ -11,10 +11,11 @@ signal changed
 
 enum T { GRASS, WOOD, ROCK, RIVER, VOID }
 enum L { CANAL, DERELICT, PATH, ROAD }
-enum B { NONE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, CHURCH, FARM, MANOR }
+enum B { NONE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, CHURCH, FARM, MANOR, CARPARK, GARDEN }
 enum Tool { PAN, CANAL, PATH, ROAD, TREE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, ERASE,
 	RESTORE, LOCK_BRICK, LOCK_STONE, BRIDGE_BRICK, BRIDGE_STONE, BRIDGE_WOOD,
-	ROAD_WIDE, PATH_TARMAC, PATH_DIRT, ROUNDABOUT, HEDGE_ROW, WALL_ROW, FENCE_ROW }
+	ROAD_WIDE, PATH_TARMAC, PATH_DIRT, ROUNDABOUT, HEDGE_ROW, WALL_ROW, FENCE_ROW,
+	CARPARK, GARDEN, MOORINGS, BASIN }
 
 const DIRS8: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1),
@@ -27,9 +28,11 @@ const LOCK_COST := 25
 const BRIDGE_COST := 20
 const TREE_COST := 2
 const BUILD_COST := {Tool.COTTAGE: 25, Tool.TERRACE: 40, Tool.SHOP: 45, Tool.CAFE: 35, Tool.PUB: 50,
-	Tool.BOATYARD: 60, Tool.WINDMILL: 70}
+	Tool.BOATYARD: 60, Tool.WINDMILL: 70, Tool.CARPARK: 15, Tool.GARDEN: 20}
+## Add-ons that join the plot of the building beside them.
+const ADDONS := [B.CARPARK, B.GARDEN]
 const TOOL_BUILDING := {Tool.COTTAGE: B.COTTAGE, Tool.TERRACE: B.TERRACE, Tool.SHOP: B.SHOP, Tool.CAFE: B.CAFE,
-	Tool.PUB: B.PUB, Tool.BOATYARD: B.BOATYARD, Tool.WINDMILL: B.WINDMILL}
+	Tool.PUB: B.PUB, Tool.BOATYARD: B.BOATYARD, Tool.WINDMILL: B.WINDMILL, Tool.CARPARK: B.CARPARK, Tool.GARDEN: B.GARDEN}
 const TOOL_LINK := {Tool.CANAL: L.CANAL, Tool.PATH: L.PATH, Tool.ROAD: L.ROAD,
 	Tool.ROAD_WIDE: L.ROAD, Tool.PATH_TARMAC: L.PATH, Tool.PATH_DIRT: L.PATH}
 ## Surface of each path or road tool, and what one length of it costs.
@@ -47,7 +50,14 @@ const EXIT_COST := 15
 const CLEAR_TREES_COST := 6
 ## Share of the cost given back when the player demolishes their own work.
 const DEMOLISH_REFUND := 0.5
-const CHARM := {B.COTTAGE: 4, B.TERRACE: 6, B.SHOP: 7, B.CAFE: 6, B.PUB: 8, B.BOATYARD: 9, B.WINDMILL: 10}
+const CHARM := {B.COTTAGE: 4, B.TERRACE: 6, B.SHOP: 7, B.CAFE: 6, B.PUB: 8, B.BOATYARD: 9, B.WINDMILL: 10,
+	B.GARDEN: 3}
+## Canal features: moorings with bollards, and wide water (a winding hole).
+const CANAL_FEATURES := {Tool.MOORINGS: "moorings", Tool.BASIN: "basin"}
+const FEATURE_COST := {"moorings": 10, "basin": 25}
+const FEATURE_CHARM := {"moorings": 2, "basin": 3}
+## Knocking down a building that came with the map costs this.
+const PLACE_DEMOLISH_COST := 40
 const LOCK_CHARM := 2
 const STYLE_COST := 10
 ## Tools that rebuild an existing lock or bridge in another style.
@@ -80,6 +90,7 @@ var link_style := {}  # edge key -> path or road surface ("gravel", "lane", ...)
 var verges := {}      # edge key -> "hedge", "wall" or "fence" lining a path or road
 var roundabouts := {} # cell -> true
 var exits := {}       # edge cell -> [direction, L, style] for a path or road leaving the map
+var features := {}    # canal cell -> "moorings" or "basin"
 
 var portals: Array = []     # [{cell, dir, name}] canals running off the map
 var places: Array = []      # [{cell, kind, need, name, ok}] to be connected
@@ -438,7 +449,16 @@ func check_place(tool: int, c: Vector2i) -> String:
 		var beside := false
 		for d in DIRS8:
 			beside = beside or adj.has(c + d)
-		if not beside:
+		if tool == Tool.GARDEN or tool == Tool.CARPARK:
+			var next_to := false
+			for d in DIRS4:
+				var k := building(c + d)
+				next_to = next_to or (k != B.NONE and k not in ADDONS)
+				if tool == Tool.CARPARK:
+					next_to = next_to or not link_dirs(c + d, [L.ROAD]).is_empty()
+			if not next_to:
+				return "Put it next to a building%s" % (" or a road" if tool == Tool.CARPARK else "")
+		elif not beside:
 			return "Build beside a canal, path or road"
 		if tool == Tool.BOATYARD:
 			var waterside := false
@@ -490,6 +510,9 @@ func check_bulldoze(c: Vector2i) -> Dictionary:
 	if exits.has(c):
 		back += EXIT_COST
 		any = true
+	if features.has(c):
+		back += FEATURE_COST[features[c]]
+		any = true
 	var i := idx(c)
 	if (bld[i] != B.NONE and bld_fixed[i] == 0) or planted[i] == 1:
 		back += cell_paid[i]
@@ -499,8 +522,20 @@ func check_bulldoze(c: Vector2i) -> Dictionary:
 	if terrain[i] == T.WOOD:
 		return {"what": "trees", "coins": -CLEAR_TREES_COST}
 	if bld[i] != B.NONE:
-		return {"what": "place", "coins": 0}
+		if _protected(c):
+			return {"what": "protected", "coins": 0}
+		return {"what": "place", "coins": -PLACE_DEMOLISH_COST}
 	return {"what": "", "coins": 0}
+
+
+# Where the map's canals, roads and rivers start and end: never cleared.
+func _protected(c: Vector2i) -> bool:
+	if open_ends.has(c):
+		return true
+	for p in portals:
+		if p.cell == c:
+			return true
+	return false
 
 
 ## Clears a cell: the player's own work comes down for half its cost back;
@@ -510,8 +545,22 @@ func bulldoze(c: Vector2i) -> String:
 	match plan.what:
 		"":
 			return "Nothing here to bulldoze"
+		"protected":
+			return "The map's routes start here - it can't be knocked down"
 		"place":
-			return "%s belongs here - it can't be knocked down" % _place_name(c)
+			if not unlimited and PLACE_DEMOLISH_COST > coins:
+				return "Knocking down %s needs %d coins" % [_place_name(c), PLACE_DEMOLISH_COST]
+			var gone := []
+			for p in places:
+				if p.cell == c:
+					gone.append(p)
+			for p in gone:
+				places.erase(p)
+			bld[idx(c)] = B.NONE
+			bld_fixed[idx(c)] = 0
+			_spend(PLACE_DEMOLISH_COST)
+			recompute()
+			return ""
 		"trees":
 			if not unlimited and CLEAR_TREES_COST > coins:
 				return "Clearing trees needs %d coins" % CLEAR_TREES_COST
@@ -544,6 +593,9 @@ func bulldoze(c: Vector2i) -> String:
 	if exits.has(c):
 		_refund_part(EXIT_COST)
 		exits.erase(c)
+	if features.has(c):
+		_refund_part(FEATURE_COST[features[c]])
+		features.erase(c)
 	var i := idx(c)
 	if (bld[i] != B.NONE and bld_fixed[i] == 0) or planted[i] == 1:
 		_refund_part(cell_paid[i])
@@ -594,6 +646,29 @@ func add_verge(a: Vector2i, b: Vector2i, kind: String) -> String:
 	_spend(VERGE_COST[kind])
 	recompute()
 	return ""
+
+
+## Adds moorings or wide water to a stretch of working canal.
+func add_feature(c: Vector2i, kind: String) -> String:
+	if not has_canal(c) or link_dirs(c, [L.CANAL]).size() + int(_portal_cell(c)) > 2:
+		return "Moorings and wide water go on a plain stretch of canal"
+	if lock_at(c).x >= 0 or has_bridge(c):
+		return "Not at a lock or bridge"
+	if features.has(c):
+		return "There's already %s here - bulldoze it first" % ("moorings" if features[c] == "moorings" else "wide water")
+	if not unlimited and FEATURE_COST[kind] > coins:
+		return "Not enough coins (%d needed)" % FEATURE_COST[kind]
+	features[c] = kind
+	_spend(FEATURE_COST[kind])
+	recompute()
+	return ""
+
+
+func _portal_cell(c: Vector2i) -> bool:
+	for p in portals:
+		if p.cell == c:
+			return true
+	return false
 
 
 ## Turns a road junction into a roundabout.
@@ -717,6 +792,8 @@ func recompute() -> void:
 			charm += LOCK_CHARM
 	for k in verges:
 		charm += VERGE_CHARM.get(verges[k], 0)
+	for c in features:
+		charm += FEATURE_CHARM.get(features[c], 0)
 	for c in adj:
 		if is_bridge(c):
 			for e in adj[c]:

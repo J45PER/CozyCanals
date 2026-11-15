@@ -25,6 +25,8 @@ const CATEGORIES := [
 	["Restore", T.RESTORE, [[T.RESTORE, "Restore", "4 a length"]]],
 	["Waterways", T.CANAL, [
 		[T.CANAL, "Canal", "12 a step"],
+		[T.MOORINGS, "Moorings", "10"],
+		[T.BASIN, "Wide water", "25"],
 		[T.LOCK_STONE, "Stone lock", "rebuild 10"],
 		[T.LOCK_BRICK, "Brick lock", "rebuild 10"]]],
 	["Roads & Paths", T.PATH, [
@@ -40,7 +42,8 @@ const CATEGORIES := [
 	["Buildings", T.COTTAGE, [
 		[T.COTTAGE, "Cottage", "25"], [T.TERRACE, "Terrace", "40"], [T.SHOP, "Shop", "45"],
 		[T.CAFE, "Cafe", "35"], [T.PUB, "Pub", "50"], [T.BOATYARD, "Boatyard", "60"],
-		[T.WINDMILL, "Windmill", "70"]]],
+		[T.WINDMILL, "Windmill", "70"],
+		[T.CARPARK, "Car park", "15"], [T.GARDEN, "Beer garden", "20"]]],
 	["Nature", T.TREE, [
 		[T.TREE, "Trees", "2"],
 		[T.HEDGE_ROW, "Hedgerow", "3 a length"],
@@ -66,7 +69,11 @@ const TOOL_HINTS := {
 	T.BRIDGE_BRICK: "Tap a bridge to rebuild it as a brick humpback",
 	T.BRIDGE_STONE: "Tap a bridge to rebuild it as a stone arch",
 	T.BRIDGE_WOOD: "Tap a bridge to rebuild it as a wooden footbridge",
-	T.ERASE: "Tap to knock down what you built (half back) or clear trees (6)",
+	T.MOORINGS: "Tap a canal to add moorings - bollards and a boat tied up",
+	T.BASIN: "Tap a canal to widen it into a winding hole",
+	T.CARPARK: "Put a car park next to a building or road - it joins that building's plot",
+	T.GARDEN: "Put a beer garden next to a pub, cafe or any building - it joins that plot",
+	T.ERASE: "Tap to knock down what you built (half back), clear trees (6), or a map building (40)",
 }
 const SUPERSAMPLE_PIXELS := 6000000.0   # render budget for smoothing edges
 
@@ -520,9 +527,24 @@ func _use_tool(screen_pos: Vector2, first: bool) -> void:
 		if err == "":
 			view.add_puff(c)
 			view.refresh(c)
-			_show_toast("Trees cleared for %d coins" % -plan.coins if plan.coins < 0 else "Knocked down - %d coins back" % plan.coins)
+			if plan.what == "trees":
+				_show_toast("Trees cleared for %d coins" % -plan.coins)
+			elif plan.what == "place":
+				_show_toast("Knocked down for %d coins" % -plan.coins)
+			else:
+				_show_toast("Knocked down - %d coins back" % plan.coins)
 		else:
 			_show_toast(err)
+		return
+	if World.CANAL_FEATURES.has(tool):
+		if not first:
+			return
+		var ferr := world.add_feature(c, World.CANAL_FEATURES[tool])
+		if ferr == "":
+			view.add_puff(c)
+			view.refresh(c)
+		else:
+			_show_toast(ferr)
 		return
 	if tool == T.ROUNDABOUT:
 		if not first:

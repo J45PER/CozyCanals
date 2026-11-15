@@ -73,6 +73,32 @@ func _draw() -> void:
 			draw_circle(c, 15.0, Color("7f7d79"))
 			draw_circle(c, 7.5, Color("f1ece0"))
 			draw_circle(c, 6.0, Color("8fb36a"))
+		T.CARPARK:
+			draw_rect(Rect2(c + Vector2(-24, -14), Vector2(48, 28)), Color("8b8882"))
+			for x in range(-16, 17, 11):
+				draw_line(c + Vector2(x, -14), c + Vector2(x, -4), Color("f1ece0"), 1.5)
+				draw_line(c + Vector2(x, 4), c + Vector2(x, 14), Color("f1ece0"), 1.5)
+			draw_rect(Rect2(c + Vector2(-13, -12), Vector2(9, 7)), Color("c0392b"))
+			draw_rect(Rect2(c + Vector2(6, 6), Vector2(9, 7)), Color("2c4466"))
+		T.GARDEN:
+			draw_rect(Rect2(c + Vector2(-24, -6), Vector2(48, 20)), Color("a9c97b"))
+			for x: float in [-11.0, 11.0]:
+				draw_rect(Rect2(c + Vector2(x - 6, 4), Vector2(12, 4)), Color("8a6a45"))
+				draw_line(c + Vector2(x, 4), c + Vector2(x, -10), Color("3a2f27"), 1.5)
+				draw_colored_polygon(PackedVector2Array([c + Vector2(x - 9, -9), c + Vector2(x, -16), c + Vector2(x + 9, -9)]),
+					Color("d4604c") if x < 0 else Color("3f7a55"))
+		T.MOORINGS:
+			draw_rect(Rect2(c + Vector2(-26, -4), Vector2(52, 16)), Color("6aa3a8"))
+			draw_rect(Rect2(c + Vector2(-26, -12), Vector2(52, 8)), Color("e2cfa3"))
+			for x: float in [-16.0, 0.0, 16.0]:
+				draw_rect(Rect2(c + Vector2(x - 2, -13), Vector2(4, 6)), Color("26211e"))
+			draw_rect(Rect2(c + Vector2(-18, -1), Vector2(36, 8)), Color("2f5a48"))
+			draw_rect(Rect2(c + Vector2(-14, -4), Vector2(26, 4)), Color("e6d6a4"))
+		T.BASIN:
+			draw_line(c + Vector2(-26, 0), c + Vector2(26, 0), Color("cfc3a6"), 14.0)
+			draw_circle(c, 15.0, Color("cfc3a6"))
+			draw_line(c + Vector2(-26, 0), c + Vector2(26, 0), Color("6aa3a8"), 9.0)
+			draw_circle(c, 12.0, Color("6aa3a8"))
 		T.HEDGE_ROW, T.WALL_ROW, T.FENCE_ROW:
 			draw_line(c + Vector2(-26, 2), c + Vector2(26, 2), Color("e2cfa3"), 7.0)
 			for y: float in [-8.0, 11.0]:
