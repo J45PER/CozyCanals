@@ -68,7 +68,8 @@ class Sprite {
     b[2] = Math.max(b[2], x + pad); b[3] = Math.max(b[3], y + pad);
   }
   attrs(fill, o = {}) {
-    const stroke = o.stroke === undefined ? dark(fill, 0.38) : o.stroke;
+    // Flat style: no outlines, unless a shape asks for one.
+    const stroke = o.outline ? dark(fill, 0.38) : null;
     let s = ` fill="${fill}"`;
     if (stroke) s += ` stroke="${stroke}" stroke-width="${o.sw ?? 0.45}" stroke-linejoin="round" stroke-linecap="round"`;
     if (o.opacity !== undefined) s += ` opacity="${o.opacity}"`;
@@ -95,15 +96,21 @@ class Sprite {
   shadow(x, y, rx, ry, strength = 0.3) {
     const c = P(x, y);
     this.grow(c[0] - rx - 3, c[1] - ry - 3); this.grow(c[0] + rx + 3, c[1] + ry + 3);
-    this.back.push(`<ellipse cx="${f2(c[0])}" cy="${f2(c[1])}" rx="${f2(rx)}" ry="${f2(ry)}" fill="${C.shadow}" opacity="${strength}" filter="url(#blur)"/>`);
+    this.back.push(`<ellipse cx="${f2(c[0])}" cy="${f2(c[1])}" rx="${f2(rx * 0.85)}" ry="${f2(ry * 0.85)}" fill="${C.shadow}" opacity="${f2(strength * 0.6)}"/>`);
   }
   /** Two-stop gradient; returns a fill reference. */
-  grad(a, b, x1 = 0, y1 = 0, x2 = 0, y2 = 1) {
+  grad(a, b) {
+    return mix(a, b, 0.5);   // flat style: one colour per face
+  }
+  _gradUnused(a, b, x1 = 0, y1 = 0, x2 = 0, y2 = 1) {
     const id = `g${this.n++}`;
     this.defs.push(`<linearGradient id="${id}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient>`);
     return `url(#${id})`;
   }
-  radial(a, b, cx = 0.62, cy = 0.3) {
+  radial(a, b) {
+    return mix(a, b, 0.6);
+  }
+  _radialUnused(a, b, cx = 0.62, cy = 0.3) {
     const id = `g${this.n++}`;
     this.defs.push(`<radialGradient id="${id}" cx="${cx}" cy="${cy}" r="0.75"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></radialGradient>`);
     return `url(#${id})`;
@@ -117,7 +124,6 @@ class Sprite {
     const seed = 1 + (this.name.length * 7 + this.name.charCodeAt(0)) % 40;
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${w * SCALE}" height="${h * SCALE}" viewBox="${x} ${y} ${w} ${h}">
 <defs>
-<filter id="blur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.6"/></filter>
 ${this.defs.join("\n")}
 </defs>
 ${this.back.join("\n")}
@@ -139,6 +145,8 @@ function panel(s, f, a0, a1, z0, z1, fill, o) {
 }
 
 function wallTexture(s, f, a0, a1, z0, z1, kind, base) {
+  // Flat style keeps only timber framing, which is part of the building's shape.
+  if (kind !== "timber") return;
   if (kind === "brick") {
     for (let z = z0 + 1.6; z < z1 - 0.5; z += 1.7) s.line(f(a0, z), f(a1, z), dark(base, 0.3), 0.22, { opacity: 0.55 });
     for (let i = 0; i < (a1 - a0) * (z1 - z0) * 1.6; i++) {
@@ -191,6 +199,7 @@ function chimney(s, x, y, z0, z1, col = C.brick, smoke = true) {
 }
 
 function roofTexture(s, at, kind, base) {
+  return;   // flat style: plain roofs
   // `at(u, v)` maps the roof plane: u along the eaves, v from eaves (0) to ridge (1).
   if (kind === "thatch") {
     for (let i = 0; i < 46; i++) {
@@ -268,6 +277,7 @@ function roof(s, o) {
 }
 
 function plot(s, rx = 27, ry = 13.5, col = "#9fbb72") {
+  return;   // buildings sit straight on the field
   s.oval(P(0.5, 0.5), rx, ry, col, { stroke: null, opacity: 0.38 });
 }
 
@@ -714,7 +724,7 @@ function canopy(s, c, r, cols, n = 9) {
   blobs.sort((a, b) => b[1] - a[1]);
   blobs.forEach((b) => s.oval([b[0] - r * 0.08, b[1] + r * 0.1], b[2], b[2] * 0.92, d, { sw: 0.4 }));
   blobs.forEach((b) => s.oval([b[0], b[1]], b[2] * 0.94, b[2] * 0.86, s.radial(l, m), { stroke: null }));
-  for (let i = 0; i < n * 3; i++) {
+  for (let i = 0; i < 0; i++) {
     const a = s.rand() * Math.PI * 2, t = Math.sqrt(s.rand()) * 0.85;
     const p = [c[0] + Math.cos(a) * r * t, c[1] + Math.sin(a) * r * t * 0.8];
     const up = p[1] < c[1] && p[0] > c[0] - r * 0.3;
@@ -730,7 +740,7 @@ function oak(name, seed, size, cols) {
     s.poly([[b[0] - 2.2 * size, b[1]], [b[0] + 2.2 * size, b[1]], [b[0] + 1.4 * size, b[1] - 15 * size], [b[0] - 1.4 * size, b[1] - 15 * size]], s.grad(light(C.trunk, 0.1), dark(C.trunk, 0.25), 1, 0, 0, 0), { sw: 0.4 });
     s.line([b[0], b[1] - 10 * size], [b[0] - 5 * size, b[1] - 17 * size], C.trunk, 1.1 * size);
     s.line([b[0], b[1] - 11 * size], [b[0] + 5 * size, b[1] - 18 * size], C.trunk, 1.0 * size);
-    canopy(s, [b[0], b[1] - 25 * size], 14 * size, cols, 9);
+    canopy(s, [b[0], b[1] - 25 * size], 14 * size, cols, 6);
     return s;
   };
 }
@@ -759,7 +769,6 @@ T.poplar_a = () => {
   s.poly([[b[0] - 1.2, b[1]], [b[0] + 1.2, b[1]], [b[0] + 0.9, b[1] - 9], [b[0] - 0.9, b[1] - 9]], C.trunk, { sw: 0.3 });
   s.oval([b[0] - 0.6, b[1] - 24], 6.2, 18, "#4f7a3c", { sw: 0.45 });
   s.oval([b[0] + 0.8, b[1] - 25], 5, 16.5, s.radial("#93bd62", "#628f45"), { stroke: null });
-  for (let i = 0; i < 16; i++) s.oval([b[0] + (s.rand() - 0.5) * 7, b[1] - 9 - s.rand() * 30], 1, 1.8, s.rand() > 0.5 ? "#a9cc74" : "#4f7a3c", { stroke: null, opacity: 0.5 });
   return s;
 };
 

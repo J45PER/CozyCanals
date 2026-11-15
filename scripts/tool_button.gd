@@ -54,6 +54,42 @@ func _draw() -> void:
 		T.ERASE:
 			draw_line(c + Vector2(-11, -11), c + Vector2(11, 11), Color("c0553f"), 5.0)
 			draw_line(c + Vector2(11, -11), c + Vector2(-11, 11), Color("c0553f"), 5.0)
+		T.RESTORE:
+			# Silted canal on the left, clear water on the right.
+			_curve(c, Color("9a6a55"), 15.0)
+			var pts := PackedVector2Array()
+			for i in 7:
+				var t := i / 12.0
+				pts.append(c + Vector2(-24 + 48 * t, sin(t * TAU) * 7.0 - 2.0 + t * 6.0))
+			draw_polyline(pts, Color("7c8a62"), 10.0, true)
+			var rest := PackedVector2Array()
+			for i in range(6, 13):
+				var t := i / 12.0
+				rest.append(c + Vector2(-24 + 48 * t, sin(t * TAU) * 7.0 - 2.0 + t * 6.0))
+			draw_polyline(rest, Color("6aa3a8"), 10.0, true)
+			draw_circle(c + Vector2(-8, -10), 2.5, Color("f1c84b"))
+			draw_circle(c + Vector2(12, -12), 1.8, Color("f1c84b"))
+		T.LOCK_BRICK, T.LOCK_STONE:
+			var edge := Color("a8604a") if tool_id == T.LOCK_BRICK else Color("c9bea4")
+			draw_rect(Rect2(c + Vector2(-20, -10), Vector2(40, 22)), edge)
+			draw_rect(Rect2(c + Vector2(-15, -6), Vector2(30, 14)), Color("6aa3a8"))
+			for x: float in [-9.0, 9.0]:
+				draw_rect(Rect2(c + Vector2(x - 2, -8), Vector2(4, 18)), Color("3a2f27"))
+				draw_line(c + Vector2(x, -12), c + Vector2(x - 12, -16), Color("26211e"), 3.0)
+				draw_line(c + Vector2(x - 9, -15.3), c + Vector2(x - 12, -16), Color("f4efe2"), 3.0)
+		T.BRIDGE_BRICK, T.BRIDGE_STONE, T.BRIDGE_WOOD:
+			var wall: Color = {T.BRIDGE_BRICK: Color("ab5a43"), T.BRIDGE_STONE: Color("c3b8a0"), T.BRIDGE_WOOD: Color("8a6a45")}[tool_id]
+			draw_rect(Rect2(c + Vector2(-24, 6), Vector2(48, 8)), Color("6aa3a8"))
+			if tool_id == T.BRIDGE_WOOD:
+				draw_line(c + Vector2(-24, 3), c + Vector2(24, 3), wall, 4.0)
+				draw_line(c + Vector2(-22, -5), c + Vector2(22, -5), wall, 2.0)
+				for x: float in [-18.0, 0.0, 18.0]:
+					draw_line(c + Vector2(x, -5), c + Vector2(x, 12), wall.darkened(0.2), 2.0)
+			else:
+				var arch := PackedVector2Array([c + Vector2(-26, 12), c + Vector2(-16, -4), c + Vector2(0, -9),
+					c + Vector2(16, -4), c + Vector2(26, 12), c + Vector2(13, 12), c + Vector2(9, 5),
+					c + Vector2(0, 2), c + Vector2(-9, 5), c + Vector2(-13, 12)])
+				draw_colored_polygon(arch, wall)
 	if World.TOOL_BUILDING.has(tool_id) or tool_id == T.TREE:
 		# Building and planting tools show the sprite itself.
 		var name := "oak_a" if tool_id == T.TREE else Sprites.pick(View.BUILDING_SPRITE[World.TOOL_BUILDING[tool_id]], 0)

@@ -12,7 +12,8 @@ signal changed
 enum T { GRASS, WOOD, ROCK, RIVER, VOID }
 enum L { CANAL, DERELICT, PATH, ROAD }
 enum B { NONE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, CHURCH, FARM, MANOR }
-enum Tool { PAN, CANAL, PATH, ROAD, TREE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, ERASE }
+enum Tool { PAN, CANAL, PATH, ROAD, TREE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, ERASE,
+	RESTORE, LOCK_BRICK, LOCK_STONE, BRIDGE_BRICK, BRIDGE_STONE, BRIDGE_WOOD }
 
 const DIRS8: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1), Vector2i(-1, 1),
@@ -31,6 +32,12 @@ const TOOL_BUILDING := {Tool.COTTAGE: B.COTTAGE, Tool.TERRACE: B.TERRACE, Tool.S
 const TOOL_LINK := {Tool.CANAL: L.CANAL, Tool.PATH: L.PATH, Tool.ROAD: L.ROAD}
 const CHARM := {B.COTTAGE: 4, B.TERRACE: 6, B.SHOP: 7, B.CAFE: 6, B.PUB: 8, B.BOATYARD: 9, B.WINDMILL: 10}
 const LOCK_CHARM := 2
+const STYLE_COST := 10
+## Tools that rebuild an existing lock or bridge in another style.
+const STYLE_TOOLS := {
+	Tool.LOCK_BRICK: ["lock", "brick"], Tool.LOCK_STONE: ["lock", "stone"],
+	Tool.BRIDGE_BRICK: ["bridge", "brick"], Tool.BRIDGE_STONE: ["bridge", "stone"], Tool.BRIDGE_WOOD: ["bridge", "wood"],
+}
 const BRIDGE_CHARM := 3
 
 var title := ""
@@ -50,6 +57,8 @@ var fixed := {}       # edge key -> true for links that came with the map
 var paid := {}        # edge key -> coins spent on it
 var restored := {}    # edge key -> true where derelict canal was restored
 var offsets := {}     # cell -> where in the cell (0..1) its lines meet; centre if absent
+var styles := {}      # cell -> "brick", "stone" or "wood" for a lock or bridge rebuilt by the player
+var style_paid := {}  # cell -> coins spent restyling it
 
 var portals: Array = []     # [{cell, dir, name}] canals running off the map
 var places: Array = []      # [{cell, kind, need, name, ok}] to be connected
@@ -214,6 +223,55 @@ func derelict_run(c: Vector2i) -> Array:
 				visited[e[0]] = true
 				queue.append(e[0])
 	return out
+
+
+## Restores the old, silted canal that runs through cell `c` (each length
+## that touches it). Returns {count, cost, err}.
+func restore_at(c: Vector2i) -> Dictionary:
+	var todo := []
+	var total := 0
+	for e in adj.get(c, []):
+		if e[1] == L.DERELICT:
+			todo.append(e[0])
+			total += _scaled(DREDGE_COST, e[0].x != c.x and e[0].y != c.y)
+	if todo.is_empty():
+		return {"count": 0, "cost": 0, "err": "No silted canal here"}
+	if not unlimited and total > coins:
+		return {"count": 0, "cost": total, "err": "Restoring this needs %d coins" % total}
+	for n in todo:
+		add_link(c, n, L.CANAL)
+	return {"count": todo.size(), "cost": total, "err": ""}
+
+
+## The upper cell of a lock that uses cell `c`, or (-1, -1).
+func lock_at(c: Vector2i) -> Vector2i:
+	for pair in locks():
+		if pair[0] == c or pair[1] == c:
+			return pair[1]
+	return Vector2i(-1, -1)
+
+
+## True if a path or road crosses water (canal or river) at `c`.
+func has_bridge(c: Vector2i) -> bool:
+	return is_bridge(c) or (terrain_at(c) == T.RIVER and land_links(c) > 0)
+
+
+## Rebuilds the lock or bridge at `c` in the tool's style. Returns "" or why not.
+func restyle(tool: int, c: Vector2i) -> String:
+	var what: String = STYLE_TOOLS[tool][0]
+	var style: String = STYLE_TOOLS[tool][1]
+	var at := lock_at(c) if what == "lock" else (c if has_bridge(c) else Vector2i(-1, -1))
+	if at.x < 0:
+		return "Tap a lock to rebuild it" if what == "lock" else "Tap a bridge to rebuild it"
+	if styles.get(at, "") == style:
+		return "It's already built like that"
+	if not unlimited and STYLE_COST > coins:
+		return "Not enough coins (%d needed)" % STYLE_COST
+	styles[at] = style
+	style_paid[at] = style_paid.get(at, 0) + STYLE_COST
+	_spend(STYLE_COST)
+	recompute()
+	return ""
 
 
 ## Restores the whole derelict stretch through `c`. Returns {count, cost, err}.
@@ -396,6 +454,11 @@ func erase(c: Vector2i) -> bool:
 			links.erase(k)
 		if e[1] == L.CANAL:
 			net_version += 1
+		removed = true
+	if styles.has(c):
+		_refund(style_paid.get(c, 0))
+		styles.erase(c)
+		style_paid.erase(c)
 		removed = true
 	var i := idx(c)
 	if (bld[i] != B.NONE and bld_fixed[i] == 0) or planted[i] == 1:

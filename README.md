@@ -17,18 +17,23 @@ To play on a phone or tablet, use Godot's **one-click deploy** (Android) or
 
 ## How to play
 
-Canals run off the edge of the map at signposted points. Drag with the Canal
-tool to draw a line between them; the line follows your finger. Tap a stretch
-of old, silted canal to restore the whole run at once. Once two are joined, narrowboats pass through and each one earns coins.
+Canals run off the edge of the map at signposted points and on into the
+countryside beyond. Drag with the Canal tool to draw a line between them; the
+line follows your finger. Only the land inside the white outline can be built on. Once two are joined, narrowboats pass through and each one earns coins.
 
-| Tool | What it does | Cost |
+The build bar works like a city builder's: tap a category to open its tools,
+tap a tool to pick it, and tap it again (or close the category) to put it down.
+With no tool picked, one finger moves the map. Two fingers pan and pinch-zoom
+at any time; the + / - / Fit buttons on the right zoom and bring the map back.
+
+| Category | Tools | Cost |
 | --- | --- | --- |
-| Move | Drag the map (two fingers pan and pinch-zoom with any tool) | - |
-| Canal | Drag to dig. Cheap along derelict canal or a river. Climbing a level builds a lock | 12 a step, lock +25 |
-| Path | Drag a footpath from a place to the towpath | 2 a step |
-| Road | Drag a road from a farm to an existing road (later levels) | 6 a step |
-| Trees, Cottage, Terrace, Shop, Cafe, Pub, Boatyard, Windmill | Add charm. Buildings go beside a canal, path or road; a boatyard needs canal alongside | 2 - 70 |
-| Erase | Removes what you built on a spot and refunds it in full | - |
+| Restore | Tap or drag along silted old canal to restore that part of it | 4 a length |
+| Waterways | Canal (drag to dig; climbing a level builds a lock), Stone lock, Brick lock (tap a lock to rebuild it) | 12 a step, lock +25, rebuild 10 |
+| Roads & Paths | Path, Road, and Brick, Stone or Footbridge (tap a bridge to rebuild it) | 2 / 6 a step, rebuild 10 |
+| Buildings | Cottage, Terrace, Shop, Cafe, Pub, Boatyard, Windmill | 25 - 70 |
+| Nature | Trees | 2 |
+| Bulldoze | Remove anything you built, with a full refund | - |
 
 A path or road that crosses water gets a bridge automatically (+20).
 

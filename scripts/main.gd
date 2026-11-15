@@ -18,21 +18,41 @@ const SAVE_PATH := "user://save.cfg"
 
 const MAX_BOATS := 3
 const BOAT_GAP := 4.0   # seconds between boats setting off
-const TOOLS := [
-	[T.PAN, "Move", "drag map"],
-	[T.CANAL, "Canal", "12 a step"],
-	[T.PATH, "Path", "2 a step"],
-	[T.ROAD, "Road", "6 a step"],
-	[T.TREE, "Trees", "2"],
-	[T.COTTAGE, "Cottage", "25"],
-	[T.TERRACE, "Terrace", "40"],
-	[T.SHOP, "Shop", "45"],
-	[T.CAFE, "Cafe", "35"],
-	[T.PUB, "Pub", "50"],
-	[T.BOATYARD, "Boatyard", "60"],
-	[T.WINDMILL, "Windmill", "70"],
-	[T.ERASE, "Erase", "refunds"],
+## The build bar: categories along the bottom, each opening a row of tools.
+## [name, icon tool, [[tool, label, cost], ...]]
+const CATEGORIES := [
+	["Restore", T.RESTORE, [[T.RESTORE, "Restore", "4 a length"]]],
+	["Waterways", T.CANAL, [
+		[T.CANAL, "Canal", "12 a step"],
+		[T.LOCK_STONE, "Stone lock", "rebuild 10"],
+		[T.LOCK_BRICK, "Brick lock", "rebuild 10"]]],
+	["Roads & Paths", T.PATH, [
+		[T.PATH, "Path", "2 a step"],
+		[T.ROAD, "Road", "6 a step"],
+		[T.BRIDGE_BRICK, "Brick bridge", "rebuild 10"],
+		[T.BRIDGE_STONE, "Stone bridge", "rebuild 10"],
+		[T.BRIDGE_WOOD, "Footbridge", "rebuild 10"]]],
+	["Buildings", T.COTTAGE, [
+		[T.COTTAGE, "Cottage", "25"], [T.TERRACE, "Terrace", "40"], [T.SHOP, "Shop", "45"],
+		[T.CAFE, "Cafe", "35"], [T.PUB, "Pub", "50"], [T.BOATYARD, "Boatyard", "60"],
+		[T.WINDMILL, "Windmill", "70"]]],
+	["Nature", T.TREE, [[T.TREE, "Trees", "2"]]],
+	["Bulldoze", T.ERASE, [[T.ERASE, "Bulldoze", "refunds"]]],
 ]
+## Shown when a tool is picked, so its use is clear.
+const TOOL_HINTS := {
+	T.RESTORE: "Tap or drag along the silted canal to restore it",
+	T.CANAL: "Drag to dig a canal",
+	T.PATH: "Drag a footpath from a place to the towpath",
+	T.ROAD: "Drag a road from a farm to a road",
+	T.LOCK_STONE: "Tap a lock to rebuild it in stone",
+	T.LOCK_BRICK: "Tap a lock to rebuild it in Victorian brick",
+	T.BRIDGE_BRICK: "Tap a bridge to rebuild it as a brick humpback",
+	T.BRIDGE_STONE: "Tap a bridge to rebuild it as a stone arch",
+	T.BRIDGE_WOOD: "Tap a bridge to rebuild it as a wooden footbridge",
+	T.ERASE: "Tap anything you built to remove it, with a full refund",
+}
+const SUPERSAMPLE_PIXELS := 6000000.0   # render budget for smoothing edges
 
 
 class StarRow extends Control:
@@ -73,7 +93,8 @@ var world: World
 var view: WorldView
 var mode := "menu"          # menu, journey, daily or free
 var level_idx := 0
-var tool: int = T.CANAL
+var tool: int = T.PAN
+var category := -1
 
 var _save := ConfigFile.new()
 var _font: Font
@@ -102,6 +123,14 @@ var _goal_stars: Array[StarRow] = []
 var _goal_labels: Array[Label] = []
 var _new_land: Button
 var _tool_buttons: Array[ToolButton] = []
+var _cat_buttons: Array[ToolButton] = []
+var _sub_bar: PanelContainer
+var _sub_box: HBoxContainer
+var _camera_box: Control
+var _stage_vp: SubViewport
+var _stage: Node2D
+var _view_tween: Tween
+var _restored := [0, 0]   # lengths and coins in the current restore stroke
 var _toast: PanelContainer
 var _toast_label: Label
 var _toast_tween: Tween
@@ -123,12 +152,12 @@ func _ready() -> void:
 	serif.font_names = PackedStringArray(["Georgia", "Palatino Linotype", "Book Antiqua", "Noto Serif", "DejaVu Serif", "serif"])
 	_font = serif
 	view = WorldView.new()
-	add_child(view)
 	view.boat_arrived.connect(_on_boat_arrived)
+	_build_stage()
 	_build_overlay()
 	_build_hud()
 	view._font = _font
-	get_viewport().size_changed.connect(_fit_view)
+	get_viewport().size_changed.connect(func(): _resize_stage(); _fit_view())
 	show_menu()
 
 
@@ -145,6 +174,7 @@ func show_menu() -> void:
 	view.show_labels = false
 	for c in _game_ui:
 		c.hide()
+	_sub_bar.hide()
 	_done.hide()
 	_toast.hide()
 	_refresh_menu()
@@ -187,7 +217,7 @@ func _start(wd: World, heading: String) -> void:
 	for b in _tool_buttons:
 		if b.tool_id == T.ROAD:
 			b.visible = world.allow_roads
-	_select_tool(T.CANAL)
+	_open_category(-1)
 	_refresh()
 
 
@@ -202,13 +232,53 @@ func _use_world(wd: World) -> void:
 	_fit_view()
 
 
+# The map is drawn into an off-screen image at up to twice the screen's
+# resolution and scaled down, which smooths every edge. HUD stays sharp.
+func _build_stage() -> void:
+	_stage_vp = SubViewport.new()
+	_stage_vp.disable_3d = true
+	_stage_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_stage_vp.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	add_child(_stage_vp)
+	_stage = Node2D.new()
+	_stage_vp.add_child(_stage)
+	_stage.add_child(view)
+	var layer := CanvasLayer.new()
+	layer.layer = 0
+	add_child(layer)
+	var screen := TextureRect.new()
+	screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	screen.stretch_mode = TextureRect.STRETCH_SCALE
+	screen.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	screen.texture = _stage_vp.get_texture()
+	layer.add_child(screen)
+	_resize_stage()
+
+
+func _resize_stage() -> void:
+	var virt := get_viewport().get_visible_rect().size
+	var px := Vector2(DisplayServer.window_get_size())
+	if virt.x <= 0.0 or px.x <= 0.0:
+		return
+	var k := px.x / virt.x
+	var ss := clampf(sqrt(SUPERSAMPLE_PIXELS / (px.x * px.y)), 1.0, 2.0)
+	_stage_vp.size = Vector2i((virt * k * ss).ceil())
+	_stage.scale = Vector2.ONE * k * ss
+
+
+func _fit_rect() -> Rect2:
+	var vp := get_viewport_rect().size
+	if mode == "menu":
+		return Rect2(Vector2.ZERO, vp)
+	return Rect2(24, 50, vp.x - 48 - 60, vp.y - 50 - 150)
+
+
 func _fit_view() -> void:
 	if world == null:
 		return
-	var vp := get_viewport_rect().size
-	var area := Rect2(24, 50, vp.x - 48, vp.y - 50 - 118)
-	if mode == "menu":
-		area = Rect2(0, 0, vp.x, vp.y)
+	var area := _fit_rect()
 	var b := view.bounds()
 	var s := minf(minf(area.size.x / b.size.x, area.size.y / b.size.y), 1.6)
 	if mode == "menu":
@@ -217,12 +287,57 @@ func _fit_view() -> void:
 	view.position = area.get_center() - b.get_center() * s
 
 
+## Glides back to the whole map in view.
+func recentre() -> void:
+	if world == null:
+		return
+	var keep_s := view.scale
+	var keep_p := view.position
+	_fit_view()
+	var to_s := view.scale
+	var to_p := view.position
+	view.scale = keep_s
+	view.position = keep_p
+	if _view_tween:
+		_view_tween.kill()
+	_view_tween = create_tween().set_parallel().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_view_tween.tween_property(view, "scale", to_s, 0.35)
+	_view_tween.tween_property(view, "position", to_p, 0.35)
+
+
 func _zoom_at(point: Vector2, factor: float) -> void:
 	var old := view.scale.x
-	var s := clampf(old * factor, 0.35, 3.0)
+	var s := clampf(old * factor, 0.35, 3.5)
 	var local := (point - view.position) / old
 	view.scale = Vector2(s, s)
 	view.position = point - local * s
+	_clamp_view()
+
+
+func _pan(by: Vector2) -> void:
+	view.position += by
+	_clamp_view()
+
+
+# Keeps some of the map on screen however far it is dragged.
+func _clamp_view() -> void:
+	if world == null:
+		return
+	var b := view.bounds()
+	var vp := get_viewport_rect().size
+	var lo := view.position + b.position * view.scale.x
+	var hi := lo + b.size * view.scale.x
+	var margin := vp * 0.3
+	var shift := Vector2.ZERO
+	if hi.x < margin.x:
+		shift.x = margin.x - hi.x
+	elif lo.x > vp.x - margin.x:
+		shift.x = vp.x - margin.x - lo.x
+	if hi.y < margin.y:
+		shift.y = margin.y - hi.y
+	elif lo.y > vp.y - margin.y:
+		shift.y = vp.y - margin.y - lo.y
+	view.position += shift
 
 
 func _process(delta: float) -> void:
@@ -256,6 +371,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			if _touches.size() == 1 and tool != T.PAN:
 				_painting = true
 				_last_cell = Vector2i(-1, -1)
+				_restored = [0, 0]
 				_use_tool(event.position, true)
 			else:
 				_painting = false
@@ -272,22 +388,22 @@ func _unhandled_input(event: InputEvent) -> void:
 			var mid: Vector2 = (pts[0] + pts[1]) * 0.5
 			var dist: float = pts[0].distance_to(pts[1])
 			if _pinch_dist > 0.0:
-				view.position += mid - _pinch_mid
+				_pan(mid - _pinch_mid)
 				_zoom_at(mid, dist / _pinch_dist)
 			_pinch_dist = dist
 			_pinch_mid = mid
 		elif _painting:
 			_use_tool(event.position, false)
 		elif _touches.size() == 1:
-			view.position += event.relative
+			_pan(event.relative)
 	elif event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_zoom_at(event.position, 1.1)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_zoom_at(event.position, 1.0 / 1.1)
 	elif event is InputEventMouseMotion:
-		if event.button_mask & MOUSE_BUTTON_MASK_RIGHT:
-			view.position += event.relative
+		if event.button_mask & (MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE):
+			_pan(event.relative)
 		var c := _cell_under(event.position)
 		view.hover = c if tool != T.PAN else Vector2i(-1, -1)
 		view.hover_ok = true
@@ -315,6 +431,26 @@ func _use_tool(screen_pos: Vector2, first: bool) -> void:
 	if c == _last_cell:
 		return
 	_last_cell = c
+	if tool == T.RESTORE:
+		var result := world.restore_at(c)
+		if result.err == "":
+			_restored[0] += result.count
+			_restored[1] += result.cost
+			view.add_puff(c)
+			view.refresh(c)
+		elif first or result.cost > 0:
+			_show_toast(result.err)
+		return
+	if World.STYLE_TOOLS.has(tool):
+		if not first:
+			return
+		var err := world.restyle(tool, c)
+		if err == "":
+			view.add_puff(c)
+			view.refresh(c)
+		else:
+			_show_toast(err)
+		return
 	if tool == T.ERASE:
 		if world.erase(c):
 			view.add_puff(c)
@@ -385,20 +521,15 @@ func _follow(cell: Vector2i, f0: Vector2, f1: Vector2) -> void:
 
 
 func _end_stroke() -> void:
+	if tool == T.RESTORE and _restored[0] > 0:
+		_show_toast("Restored %d lengths of old canal for %d coins" % _restored)
+		_restored = [0, 0]
 	if not World.TOOL_LINK.has(tool) or _down_cell.x < 0:
 		return
 	var c := _down_cell
 	_down_cell = Vector2i(-1, -1)
 	if not world.adj.has(c):
 		world.offsets.erase(c)
-	# A tap with the canal tool on old, silted canal restores the whole stretch.
-	if tool == T.CANAL and _stroke_links == 0 and not world.derelict_run(c).is_empty():
-		var result := world.restore_run(c)
-		if result.err != "":
-			_show_toast(result.err)
-		else:
-			_show_toast("Restored %d lengths of old canal for %d coins" % [result.count, result.cost])
-			view.add_puff(c)
 
 
 func _draw_link(a: Vector2i, b: Vector2i) -> bool:
@@ -517,11 +648,50 @@ func _show_toast(text: String) -> void:
 	_toast_tween.tween_callback(_toast.hide)
 
 
+## Picks a tool, or none (PAN) to move the map with one finger.
 func _select_tool(id: int) -> void:
+	if id == tool and id != T.PAN:
+		id = T.PAN          # tapping the chosen tool again puts it down
 	tool = id
 	view.hover = Vector2i(-1, -1)
+	view.show_derelict = tool == T.RESTORE
 	for b in _tool_buttons:
 		b.set_pressed_no_signal(b.tool_id == id)
+	if TOOL_HINTS.has(id) and mode != "menu":
+		_show_toast(TOOL_HINTS[id])
+
+
+## Opens a category's row of tools (or closes it, given -1 or the open one).
+func _open_category(i: int) -> void:
+	if i == category:
+		i = -1
+	category = i
+	for j in _cat_buttons.size():
+		_cat_buttons[j].set_pressed_no_signal(j == i)
+	for b in _tool_buttons:
+		if b.get_parent() == _sub_box:
+			_sub_box.remove_child(b)
+	if i < 0:
+		_sub_bar.hide()
+		_select_tool(T.PAN)
+		return
+	var first := -1
+	for b in _tool_buttons:
+		if b.get_meta("category") == i:
+			_sub_box.add_child(b)
+			if first < 0 and b.visible:
+				first = b.tool_id
+	_sub_bar.show()
+	_sub_bar.reset_size()
+	tool = T.PAN
+	_select_tool(first)
+
+
+func _category_of(id: int) -> int:
+	for b in _tool_buttons:
+		if b.tool_id == id:
+			return b.get_meta("category")
+	return -1
 
 
 func _refresh_menu() -> void:
@@ -681,33 +851,62 @@ func _build_hud() -> void:
 		_goal_stars.append(star)
 		_goal_labels.append(lbl)
 
-	# Toolbar, bottom centre.
+	# Build bar, bottom centre: categories, with the open one's tools above.
 	var bar := PanelContainer.new()
 	_hud.add_child(bar)
-	_pin(bar, 0.5, 1, Vector2(0, -10))
+	_pin(bar, 0.5, 1, Vector2(0, -8))
 	var bar_box := _hbox(bar, 2)
 	var clear_style := _box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 12, 4)
 	var hover_style := _box(Color("efe1bd"), Color(0, 0, 0, 0), 12, 4)
 	var on_style := _box(Color("cfe0b8"), Color("7c9f62"), 12, 4)
-	for def in TOOLS:
-		var b := ToolButton.new(def[0], def[1], def[2])
+	var styled := func(b: Button) -> void:
 		b.add_theme_stylebox_override("normal", clear_style)
 		b.add_theme_stylebox_override("hover", hover_style)
 		b.add_theme_stylebox_override("pressed", on_style)
 		b.add_theme_stylebox_override("hover_pressed", on_style)
-		b.pressed.connect(_select_tool.bind(def[0]))
-		bar_box.add_child(b)
-		_tool_buttons.append(b)
+	for i in CATEGORIES.size():
+		var cat: Array = CATEGORIES[i]
+		var cb := ToolButton.new(cat[1], cat[0], "")
+		cb.custom_minimum_size = Vector2(118, 74)
+		styled.call(cb)
+		cb.pressed.connect(_open_category.bind(i))
+		bar_box.add_child(cb)
+		_cat_buttons.append(cb)
+		for def in cat[2]:
+			var b := ToolButton.new(def[0], def[1], def[2])
+			b.custom_minimum_size = Vector2(96, 88)
+			b.set_meta("category", i)
+			styled.call(b)
+			b.pressed.connect(_select_tool.bind(def[0]))
+			_tool_buttons.append(b)
+	_sub_bar = PanelContainer.new()
+	_hud.add_child(_sub_bar)
+	_pin(_sub_bar, 0.5, 1, Vector2(0, -98))
+	_sub_box = _hbox(_sub_bar, 2)
+	_sub_bar.hide()
+
+	# Camera buttons, right edge.
+	var cam := PanelContainer.new()
+	_hud.add_child(cam)
+	_pin(cam, 1, 0.5, Vector2(-12, -10))
+	var cam_box := _vbox(cam, 6)
+	var vp_mid := func() -> Vector2: return get_viewport_rect().size * 0.5
+	cam_box.add_child(_button("+", func(): _zoom_at(vp_mid.call(), 1.3), Vector2(46, 44)))
+	cam_box.add_child(_button("-", func(): _zoom_at(vp_mid.call(), 1.0 / 1.3), Vector2(46, 44)))
+	var centre_btn := _button("Fit", recentre, Vector2(46, 44))
+	centre_btn.add_theme_font_size_override("font_size", 14)
+	cam_box.add_child(centre_btn)
+	_camera_box = cam
 
 	# Toast, just above the toolbar.
 	_toast = PanelContainer.new()
 	_toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hud.add_child(_toast)
-	_pin(_toast, 0.5, 1, Vector2(0, -136))
+	_pin(_toast, 0.5, 1, Vector2(0, -196))
 	_toast_label = _label("", 17)
 	_toast.add_child(_toast_label)
 	_toast.hide()
-	_game_ui = [info, stats, bar]
+	_game_ui = [info, stats, bar, cam]
 
 	# Level complete panel, centre.
 	_done = PanelContainer.new()

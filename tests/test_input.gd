@@ -61,6 +61,15 @@ func _tool(id: int) -> Control:
 	return null
 
 
+## Opens the tool's category on the build bar, then taps the tool.
+func _pick(id: int) -> void:
+	var cat: int = main._category_of(id)
+	if main.category != cat:
+		await _tap_control(main._cat_buttons[cat])
+	if main.tool != id:
+		await _tap_control(_tool(id))
+
+
 func _run() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://save.cfg"))
 	main = load("res://scenes/main.tscn").instantiate()
@@ -76,15 +85,21 @@ func _run() -> void:
 	var world: World = main.world
 	var start_coins := world.coins
 
-	# Tap a stretch of old canal with the canal tool: the whole run is restored.
+	# Restore tool: tapping one spot restores just the silted canal there.
 	var old_cell := Vector2i(-1, -1)
 	for k in world.links:
 		if world.links[k] == L.DERELICT:
 			old_cell = world.key_cells(k)[0]
 			break
 	var run: int = world.derelict_run(old_cell).size()
+	await _pick(T.RESTORE)
+	_expect("restore tool picked from its category", main.tool == T.RESTORE and main._sub_bar.visible)
 	await _drag([_screen(old_cell)])
-	_expect("tap restores a stretch of old canal", run > 0 and world.derelict_run(old_cell).is_empty() and world.coins < start_coins)
+	var left: int = world.derelict_run(old_cell).size() if world.adj.has(old_cell) else 0
+	_expect("tap restores part of the old canal", world.coins < start_coins and world.restored.size() > 0)
+	print("  run of %d lengths, %d restored by one tap" % [run, world.restored.size()])
+	await _pick(T.CANAL)
+	_expect("canal tool picked", main.tool == T.CANAL)
 
 	# Draw the whole canal by dragging a finger along a route, bends included.
 	var from: Vector2i = world.portals[0].cell
@@ -107,7 +122,7 @@ func _run() -> void:
 	_expect("route used diagonals", diagonal)
 
 	# Path tool: walk the pub (or church) to the towpath.
-	await _tap_control(_tool(T.PATH))
+	await _pick(T.PATH)
 	_expect("path tool selected", main.tool == T.PATH)
 	var place: Dictionary = world.places[0]
 	var walk := AutoBuild.route(world, place.cell, func(c): return world.has_canal(c), L.PATH)
@@ -119,11 +134,21 @@ func _run() -> void:
 
 	# A tap on the toolbar must not build on the land behind it.
 	var before := world.version
-	await _tap_control(_tool(T.CANAL))
+	await _pick(T.CANAL)
 	_expect("toolbar tap builds nothing", world.version == before and main.tool == T.CANAL)
 
+	# With no tool picked, one finger moves the map; Fit brings it back.
+	await _tap_control(main._cat_buttons[main.category])
+	_expect("closing the category puts the tool down", main.tool == T.PAN and not main._sub_bar.visible)
+	var at: Vector2 = main.view.position
+	await _drag([Vector2(640, 300), Vector2(500, 260)])
+	_expect("one-finger drag pans with no tool", main.view.position.distance_to(at) > 50.0 and world.version == before)
+	main.recentre()
+	await create_timer(0.6).timeout
+	_expect("fit returns to the map", main.view.position.distance_to(at) < 2.0)
+
 	# Erase refunds: rub out one canal cell in the middle and get coins back.
-	await _tap_control(_tool(T.ERASE))
+	await _pick(T.ERASE)
 	var coins := world.coins
 	var mid := path[path.size() / 2]
 	if world.fixed.has(world.key(mid, path[path.size() / 2 + 1])) and not world.restored.has(world.key(mid, path[path.size() / 2 + 1])):
@@ -150,6 +175,13 @@ func _run() -> void:
 	main.start_free(3)
 	await create_timer(0.3).timeout
 	_expect("free build is unlimited with roads", main.world.unlimited and _tool(T.ROAD).visible)
+	# Rebuild a lock in brick in free build, if the solver made one.
+	AutoBuild.run(main.world)
+	var lock_cell := Vector2i(-1, -1)
+	for pair in main.world.locks():
+		lock_cell = pair[1]
+	if lock_cell.x >= 0:
+		_expect("lock restyled", main.world.restyle(T.LOCK_BRICK, lock_cell) == "" and main.world.styles[lock_cell] == "brick")
 	main.show_menu()
 	await create_timer(0.3).timeout
 	_expect("back to menu", main._menu.visible and main._level_stars[0].filled >= 2)
