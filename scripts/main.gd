@@ -310,9 +310,16 @@ func recentre() -> void:
 	_view_tween.tween_property(view, "position", to_p, 0.35)
 
 
+func _fit_scale() -> float:
+	var area := _fit_rect()
+	var b := view.bounds()
+	return minf(minf(area.size.x / b.size.x, area.size.y / b.size.y), 1.6)
+
+
 func _zoom_at(point: Vector2, factor: float) -> void:
 	var old := view.scale.x
-	var s := clampf(old * factor, 0.35, 3.5)
+	# No further out than the whole map; the countryside beyond is scenery.
+	var s := clampf(old * factor, _fit_scale() * 0.9, 3.5)
 	var local := (point - view.position) / old
 	view.scale = Vector2(s, s)
 	view.position = point - local * s
@@ -324,25 +331,27 @@ func _pan(by: Vector2) -> void:
 	_clamp_view()
 
 
-# Keeps some of the map on screen however far it is dragged.
+# Keeps the middle of the screen over the playable map, so the view can
+# never wander off into the countryside.
 func _clamp_view() -> void:
-	if world == null:
+	if world == null or mode == "menu":
 		return
-	var b := view.bounds()
-	var vp := get_viewport_rect().size
-	var lo := view.position + b.position * view.scale.x
-	var hi := lo + b.size * view.scale.x
-	var margin := vp * 0.15
-	var shift := Vector2.ZERO
-	if hi.x < margin.x:
-		shift.x = margin.x - hi.x
-	elif lo.x > vp.x - margin.x:
-		shift.x = vp.x - margin.x - lo.x
-	if hi.y < margin.y:
-		shift.y = margin.y - hi.y
-	elif lo.y > vp.y - margin.y:
-		shift.y = vp.y - margin.y - lo.y
-	view.position += shift
+	var mid := _fit_rect().get_center()
+	var local := (mid - view.position) / view.scale.x
+	var a := local.x / WorldView.HW
+	var b := local.y / WorldView.HH
+	var m := Vector2((a + b) * 0.5, (b - a) * 0.5)
+	# The further out the zoom, the closer to the middle the view is held, so
+	# the screen is always mostly playable map.
+	var area := _fit_rect().size
+	var reach := minf(area.x / (2.0 * view.scale.x * WorldView.HW), area.y / (2.0 * view.scale.y * WorldView.HH)) * 0.45
+	var lo := Vector2(minf(reach, world.w * 0.5), minf(reach, world.h * 0.5))
+	var held := m.clamp(lo, Vector2(world.w, world.h) - lo)
+	if held == m:
+		return
+	var back := Vector2((held.x - held.y) * WorldView.HW, (held.x + held.y) * WorldView.HH)
+	view.position = mid - back * view.scale.x
+	_fling = Vector2.ZERO
 
 
 func _process(delta: float) -> void:

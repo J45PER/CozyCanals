@@ -24,7 +24,11 @@ const B := World.B
 const HW := Art.HW
 const HH := Art.HH
 const HSTEP := Art.HSTEP
-const APRON := 7              # cells of countryside drawn around the map
+## Cells of countryside drawn around the map: wide enough to fill the screen
+## at any allowed zoom, fading fully into the background before its edge.
+var APRON := 10
+var _full_fade := 8            # distance from the land where the haze is complete
+const BOAT_RUN := 6            # cells a boat travels through the countryside
 
 const CANAL_W := 0.2
 const BRICK_OLD := Color("9a6a55")       # Victorian engineering brick
@@ -133,6 +137,11 @@ func _zc(c: Vector2i) -> float:
 	return _h(c) * HSTEP
 
 
+## True for countryside so far out that the haze hides it completely.
+func _hidden(c: Vector2i) -> bool:
+	return not world.in_bounds(c) and _apron_d.get(c, APRON) > _full_fade
+
+
 ## Haze is applied by a shader (see _build_haze); colours here stay plain.
 func _fade(_c: Vector2i) -> float:
 	return 0.0
@@ -147,7 +156,8 @@ func _build_haze() -> void:
 			var c := Vector2i(x - APRON, y - APRON)
 			var f := 0.0
 			if not world.in_bounds(c):
-				f = clampf(0.32 + (_apron_d.get(c, APRON) - 1) * 0.11, 0.0, 0.9)
+				var d: int = _apron_d.get(c, APRON)
+				f = 0.3 + 0.7 * smoothstep(1.0, float(_full_fade), float(d))
 			img.set_pixel(x, y, Color(f, f, f))
 	var mat := ShaderMaterial.new()
 	mat.shader = preload("res://shaders/haze.gdshader")
@@ -163,6 +173,8 @@ func _build_haze() -> void:
 
 func set_world(wd: World) -> void:
 	world = wd
+	APRON = clampi((world.w + world.h) / 3, 11, 16)
+	_full_fade = APRON - 2
 	_boats.clear()
 	_puffs.clear()
 	_place_top.clear()
@@ -301,6 +313,8 @@ func _rebuild(budget: int) -> void:
 		var smoke := []
 		var water := []
 		for c in cells:
+			if _hidden(c):
+				continue
 			_emit_terrain(c, terrain)
 			_emit_links(c, links)
 			if _is_raised(c):
@@ -357,10 +371,10 @@ func clear_boats() -> void:
 ## Sends a boat along `path`, arriving from the distance and leaving the same way.
 func spawn_boat(path: Array[Vector2i], dir_in: Vector2i, dir_out: Vector2i) -> void:
 	var cells: Array[Vector2i] = []
-	for k in range(APRON - 1, 0, -1):
+	for k in range(BOAT_RUN, 0, -1):
 		cells.append(path[0] + dir_in * k)
 	cells.append_array(path)
-	for k in range(1, APRON):
+	for k in range(1, BOAT_RUN + 1):
 		cells.append(path[path.size() - 1] + dir_out * k)
 	_boats.append({"cells": cells, "s": 0.0, "look": randi() % maxi(Sprites.boat_liveries, 1)})
 
@@ -562,6 +576,8 @@ func _build_ground() -> void:
 	for y in range(-APRON, world.h + APRON):
 		for x in range(-APRON, world.w + APRON):
 			var c := Vector2i(x, y)
+			if _hidden(c):
+				continue
 			var o := Vector2(c)
 			var pieces := []
 			var zm := _centre_z(c)
@@ -639,6 +655,8 @@ func _build_fields() -> void:
 	for y in range(-APRON, world.h + APRON):
 		for x in range(-APRON, world.w + APRON):
 			var c := Vector2i(x, y)
+			if _hidden(c):
+				continue
 			var centre := Vector2(x + 0.5, y + 0.5)
 			var nearest := 0
 			for i in count:
