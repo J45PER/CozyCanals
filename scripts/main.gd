@@ -80,6 +80,10 @@ var _font: Font
 var _touches := {}
 var _painting := false
 var _last_cell := Vector2i(-1, -1)
+var _down_cell := Vector2i(-1, -1)
+var _last_f := Vector2.ZERO          # where the finger last was, in map coordinates
+var _stroke_best := {}               # cell -> how near the finger has passed to its middle
+var _stroke_links := 0
 var _pinch_dist := 0.0
 var _pinch_mid := Vector2.ZERO
 var _was_joined := false
@@ -257,6 +261,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_painting = false
 		else:
 			_touches.erase(event.index)
+			if _painting:
+				_end_stroke()
 			_painting = false
 			view.hover = Vector2i(-1, -1)
 	elif event is InputEventScreenDrag:
@@ -291,22 +297,22 @@ func _cell_under(screen_pos: Vector2) -> Vector2i:
 	return view.cell_at((screen_pos - view.position) / view.scale.x)
 
 
+# The point of the map under a finger, measured on the level of cell `c`.
+func _finger(screen_pos: Vector2, c: Vector2i) -> Vector2:
+	var local := (screen_pos - view.position) / view.scale.x
+	var a := local.x / WorldView.HW
+	var b := (local.y + world.height(c) * WorldView.HSTEP) / WorldView.HH
+	return Vector2((a + b) * 0.5, (b - a) * 0.5)
+
+
 func _use_tool(screen_pos: Vector2, first: bool) -> void:
 	var c := _cell_under(screen_pos)
-	if not world.in_bounds(c) or c == _last_cell:
+	if not world.in_bounds(c):
 		return
 	if World.TOOL_LINK.has(tool):
-		# Lines are drawn cell to cell: the first touch only picks the start.
-		if first or _last_cell.x < 0:
-			_last_cell = c
-			view.add_puff(c)
-			return
-		while _last_cell != c:
-			var step := _last_cell + (c - _last_cell).sign()
-			if not _draw_link(_last_cell, step):
-				_painting = false
-				return
-			_last_cell = step
+		_draw_line_to(c, _finger(screen_pos, c), first)
+		return
+	if c == _last_cell:
 		return
 	_last_cell = c
 	if tool == T.ERASE:
@@ -326,6 +332,75 @@ func _use_tool(screen_pos: Vector2, first: bool) -> void:
 		_show_toast(err)
 
 
+# Lines are linked cell to cell underneath, but each cell's part of the line
+# is placed where the finger actually passed, so the line follows the drag.
+func _draw_line_to(c: Vector2i, f: Vector2, first: bool) -> void:
+	if first or _last_cell.x < 0:
+		_last_cell = c
+		_down_cell = c
+		_stroke_links = 0
+		_stroke_best.clear()
+		_last_f = f
+		if world.can_move_node(c):
+			_stroke_best[c] = 9.0
+			_follow(c, f, f)
+		return
+	# Ignore a finger that only clips the corner of a neighbouring cell, so a
+	# diagonal stroke stays diagonal instead of gaining a kink.
+	var gap := c - _last_cell
+	if c != _last_cell and maxi(absi(gap.x), absi(gap.y)) == 1:
+		var off := f - Vector2(c)
+		if minf(minf(off.x, off.y), minf(1.0 - off.x, 1.0 - off.y)) < 0.16:
+			return
+	var touched: Array[Vector2i] = [_last_cell]
+	while _last_cell != c:
+		var step := _last_cell + (c - _last_cell).sign()
+		var free := world.can_move_node(step)
+		if not _draw_link(_last_cell, step):
+			_painting = false
+			_end_stroke()
+			return
+		if free:
+			_stroke_best[step] = 9.0
+		_last_cell = step
+		touched.append(step)
+	for cell in touched:
+		if _stroke_best.has(cell):
+			_follow(cell, _last_f, f)
+	_last_f = f
+
+
+# Moves a cell's node to where the finger's path came closest to its middle.
+func _follow(cell: Vector2i, f0: Vector2, f1: Vector2) -> void:
+	var centre := Vector2(cell) + Vector2(0.5, 0.5)
+	var q := Geometry2D.get_closest_point_to_segment(centre, f0, f1)
+	var off := q - Vector2(cell)
+	if off.x < 0.0 or off.y < 0.0 or off.x > 1.0 or off.y > 1.0:
+		return
+	var dist := q.distance_to(centre)
+	if dist < _stroke_best[cell] - 0.02:
+		_stroke_best[cell] = dist
+		world.set_offset(cell, off)
+		view.refresh(cell)
+
+
+func _end_stroke() -> void:
+	if not World.TOOL_LINK.has(tool) or _down_cell.x < 0:
+		return
+	var c := _down_cell
+	_down_cell = Vector2i(-1, -1)
+	if not world.adj.has(c):
+		world.offsets.erase(c)
+	# A tap with the canal tool on old, silted canal restores the whole stretch.
+	if tool == T.CANAL and _stroke_links == 0 and not world.derelict_run(c).is_empty():
+		var result := world.restore_run(c)
+		if result.err != "":
+			_show_toast(result.err)
+		else:
+			_show_toast("Restored %d lengths of old canal for %d coins" % [result.count, result.cost])
+			view.add_puff(c)
+
+
 func _draw_link(a: Vector2i, b: Vector2i) -> bool:
 	var type: int = World.TOOL_LINK[tool]
 	var plan := world.check_link(a, b, type)
@@ -335,7 +410,7 @@ func _draw_link(a: Vector2i, b: Vector2i) -> bool:
 		_show_toast(plan.err)
 		return false
 	world.add_link(a, b, type)
-	view.add_puff(b)
+	_stroke_links += 1
 	view.refresh(b)
 	if plan.lock:
 		_show_toast("Lock built to climb the hill")

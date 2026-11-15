@@ -56,7 +56,13 @@ static func route(world: World, start: Vector2i, is_goal: Callable, type: int) -
 
 static func build(world: World, path: Array[Vector2i], type: int) -> bool:
 	for i in range(1, path.size()):
-		var err := world.add_link(path[i - 1], path[i], type)
+		# Wander a little, as a hand-drawn line would.
+		var c := path[i]
+		var free := world.can_move_node(c)
+		var err := world.add_link(path[i - 1], c, type)
+		if free and err == "":
+			var n := (c.x * 73856093) ^ (c.y * 19349663)
+			world.set_offset(c, Vector2(0.32 + (n & 255) / 255.0 * 0.36, 0.32 + ((n >> 8) & 255) / 255.0 * 0.36))
 		if err != "" and err != "same":
 			return false
 	return not path.is_empty()

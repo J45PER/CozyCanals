@@ -21,6 +21,11 @@ const HSTEP := Art.HSTEP
 const BASE := 16.0
 
 const CANAL_W := 0.2
+const BRICK_OLD := Color("9a6a55")       # Victorian engineering brick
+const BRICK_MOSSY := Color("857a5c")
+const STONE_NEW := Color("e2dccb")       # freshly laid coping
+const CINDER := Color("b9ab92")          # old towpath
+const CINDER_EDGE := Color("8f826b")
 const BOAT_SPEED := 1.5
 ## Sprite name stem for each kind of building.
 const BUILDING_SPRITE := {
@@ -165,7 +170,10 @@ func _row(d: int) -> Array[Vector2i]:
 # True if a cell's links reach forward across a corner, so they must be
 # drawn after the two cells that flank that corner.
 func _forward(c: Vector2i) -> bool:
-	return world.link(c, c + Vector2i(1, 1)) != -1
+	for d: Vector2i in [Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1)]:
+		if world.link(c, c + d) != -1:
+			return true
+	return false
 
 
 func _bake(d: int, layer: int) -> ArrayMesh:
@@ -241,14 +249,24 @@ func _boat_state(boat: Dictionary) -> Dictionary:
 	var i := clampi(int(floor(boat.s)), 0, n - 1)
 	var f: float = boat.s - i
 	var cell := cells[i]
-	var a := Vector2(cells[i - 1] - cell) if i > 0 else Vector2(cell - cells[1])
-	var b := Vector2(cells[i + 1] - cell) if i < n - 1 else Vector2(cell - cells[n - 2])
-	var centre := Vector2(cell) + Vector2(0.5, 0.5)
-	var p0 := centre + a * 0.5
-	var p1 := centre + b * 0.5
-	var p := p0.lerp(centre, f).lerp(centre.lerp(p1, f), f)
-	var dir := (centre - p0).lerp(p1 - centre, f)
-	dir = b.normalized() if dir.length() < 0.001 else dir.normalized()
+	var p0: Vector2
+	var pc: Vector2
+	var p1: Vector2
+	if i == 0 or i == n - 1:
+		# Off the map: a straight run to or from the portal's edge.
+		var portal := cells[1] if i == 0 else cells[n - 2]
+		var edge := _join(portal, cell - portal)
+		var out := (Vector2(cell) + Vector2(0.5, 0.5) - _node(portal)).normalized()
+		p0 = edge + out if i == 0 else edge
+		p1 = edge if i == 0 else edge + out
+		pc = (p0 + p1) * 0.5
+	else:
+		p0 = _join(cell, cells[i - 1] - cell)
+		pc = _node(cell)
+		p1 = _join(cell, cells[i + 1] - cell)
+	var p := p0.lerp(pc, f).lerp(pc.lerp(p1, f), f)
+	var dir := (pc - p0).lerp(p1 - pc, f)
+	dir = (p1 - p0).normalized() if dir.length() < 0.001 else dir.normalized()
 	p += Vector2(-dir.y, dir.x) * 0.075
 
 	var lv := func(j: int) -> float: return float(world.height(cells[clampi(j, 1, n - 2)]))
@@ -457,10 +475,10 @@ func _emit_terrain(c: Vector2i, mb: Art.MB) -> void:
 
 	if _river_dirs.has(c):
 		var dirs: Array = _river_dirs[c]
-		_stroke(mb, c, dirs, 0.36, Art.RIVER_BANK, false)
-		_stroke(mb, c, dirs, 0.29, Art.RIVER_EDGE, false)
-		_stroke(mb, c, dirs, 0.25, Art.RIVER, false)
-		_stroke(mb, c, dirs, 0.07, Art.RIVER.lightened(0.18), false)
+		_stroke(mb, c, dirs, 0.36, Art.RIVER_BANK, false, true)
+		_stroke(mb, c, dirs, 0.29, Art.RIVER_EDGE, false, true)
+		_stroke(mb, c, dirs, 0.25, Art.RIVER, false, true)
+		_stroke(mb, c, dirs, 0.07, Art.RIVER.lightened(0.18), false, true)
 		Art.reeds(mb, o + Vector2(0.14 + 0.1 * Art.rnd(c.x, c.y, 8), 0.2), z, c.x)
 		if Art.rnd(c.x, c.y, 9) > 0.5:
 			Art.stone(mb, o + Vector2(0.5 + 0.1 * Art.rnd(c.x, c.y, 10), 0.55), z)
@@ -479,6 +497,10 @@ func _emit_terrain(c: Vector2i, mb: Art.MB) -> void:
 ## at the middle.
 func _band(mb: Art.MB, p0: Vector2, pc: Vector2, p1: Vector2, o0: float, o1: float,
 		z0: float, zm: float, z1: float, col: Color) -> void:
+	# Overlap the neighbouring cell's part by a hair so no crack shows at the join.
+	if p0.distance_to(pc) > 0.001 and p1.distance_to(pc) > 0.001:
+		p0 += (p0 - pc).normalized() * 0.02
+		p1 += (p1 - pc).normalized() * 0.02
 	var straight := ((p0 + p1) * 0.5).distance_to(pc) < 0.001
 	var steps := 2 if straight else 7
 	var pa := Vector2.ZERO
@@ -506,24 +528,48 @@ func _mid_z(c: Vector2i, d: Vector2, ramp: bool) -> float:
 	return _zc(c)
 
 
+# Where the lines through a cell meet. Rivers wander on their own course.
+func _node(c: Vector2i, river := false) -> Vector2:
+	if river:
+		if _river_dirs.has(c):
+			return Vector2(c) + Vector2(0.3 + 0.4 * Art.rnd(c.x, c.y, 301), 0.3 + 0.4 * Art.rnd(c.x, c.y, 302))
+		return Vector2(c) + Vector2(0.5, 0.5)
+	return world.node(c) if world.inside(c) else Vector2(c) + Vector2(0.5, 0.5)
+
+
+# Where the line from cell `c` towards its neighbour in direction `d` leaves
+# the cell. Each cell draws its own part of a line up to this point.
+func _join(c: Vector2i, d: Vector2i, river := false) -> Vector2:
+	var a := _node(c, river)
+	var b := _node(c + d, river)
+	var corner := Vector2(c) + Vector2(1.0 if d.x > 0 else 0.0, 1.0 if d.y > 0 else 0.0)
+	var axis := Vector2(d)
+	return a.lerp(b, clampf((corner - a).dot(axis) / (b - a).dot(axis), 0.0, 1.0))
+
+
 ## Symmetric ribbon of half-width `hw` joining every direction in `dirs`
-## through the cell centre. `ramp` lets it climb between levels.
-func _stroke(mb: Art.MB, c: Vector2i, dirs: Array, hw: float, col: Color, ramp: bool) -> void:
-	var centre := Vector2(c) + Vector2(0.5, 0.5)
+## through the cell's node. `ramp` lets it climb between levels. With `flags`
+## (one per direction), a stretch between two flagged directions uses `alt`.
+func _stroke(mb: Art.MB, c: Vector2i, dirs: Array, hw: float, col: Color, ramp: bool,
+		river := false, flags := [], alt := Color.WHITE) -> void:
+	var node := _node(c, river)
 	var z := _zc(c)
 	if dirs.size() <= 1:
-		mb.disc(Art.iso(centre, z), hw * 1.414 * HW, hw * 1.414 * HH, col, 14)
+		var tone := alt if (not flags.is_empty() and flags[0]) else col
+		mb.disc(Art.iso(node, z), hw * 1.414 * HW, hw * 1.414 * HH, tone, 14)
 		if dirs.size() == 1:
 			var d: Vector2 = dirs[0]
 			var zm := _mid_z(c, d, ramp)
-			_band(mb, centre, centre + d * 0.25, centre + d * 0.5, -hw, hw, z, (z + zm) * 0.5, zm, col)
+			var j := _join(c, Vector2i(d), river)
+			_band(mb, node, (node + j) * 0.5, j, -hw, hw, z, (z + zm) * 0.5, zm, tone)
 		return
 	for i in dirs.size():
-		for j in range(i + 1, dirs.size()):
+		for k in range(i + 1, dirs.size()):
 			var a: Vector2 = dirs[i]
-			var b: Vector2 = dirs[j]
-			_band(mb, centre + a * 0.5, centre, centre + b * 0.5, -hw, hw,
-				_mid_z(c, a, ramp), z, _mid_z(c, b, ramp), col)
+			var b: Vector2 = dirs[k]
+			var tone := alt if (not flags.is_empty() and flags[i] and flags[k]) else col
+			_band(mb, _join(c, Vector2i(a), river), node, _join(c, Vector2i(b), river), -hw, hw,
+				_mid_z(c, a, ramp), z, _mid_z(c, b, ramp), tone)
 
 
 func _dirs(c: Vector2i, types: Array) -> Array:
@@ -544,7 +590,7 @@ func _emit_links(c: Vector2i, mb: Art.MB) -> void:
 	if not world.adj.has(c):
 		return
 	var z := _zc(c)
-	var centre := Vector2(c) + Vector2(0.5, 0.5)
+	var node := _node(c)
 
 	var road := _dirs(c, [L.ROAD])
 	if not road.is_empty():
@@ -557,46 +603,63 @@ func _emit_links(c: Vector2i, mb: Art.MB) -> void:
 		_stroke(mb, c, path, 0.085, Art.PATH_EDGE, true)
 		_stroke(mb, c, path, 0.06, Art.PATH, true)
 
+	# Derelict canal: the old brick edging still shows through silt and weeds.
 	var old := _dirs(c, [L.DERELICT])
 	if not old.is_empty():
-		_stroke(mb, c, old, 0.26, Art.MUD, false)
-		_stroke(mb, c, old, 0.16, Art.MURK, false)
-		Art.weeds(mb, Vector2(c), z, c.x * 17 + c.y * 5)
+		_stroke(mb, c, old, CANAL_W + 0.09, BRICK_MOSSY, false)
+		_stroke(mb, c, old, CANAL_W + 0.035, Art.MUD, false)
+		_stroke(mb, c, old, 0.12, Art.MURK, false)
+		Art.weeds(mb, node - Vector2(0.5, 0.5), z, c.x * 17 + c.y * 5)
 
 	var canal := _dirs(c, [L.CANAL])
 	if canal.is_empty():
 		return
+	# Old canal (the map's own, or restored) keeps its Victorian brick edge and
+	# cinder towpath; newly dug cut has pale stone and fresh gravel.
+	var aged := []
+	for d: Vector2 in canal:
+		aged.append(world.is_old(c, c + Vector2i(d)))
 	var portal := _portal_dir(c)
 	if portal != Vector2i.ZERO:
 		canal.append(Vector2(portal))
+		aged.append(true)
 
 	# Towpath on one bank, on the same side all the way along.
 	var from := Vector2(_tp_in.get(c, Vector2i.ZERO))
+	var from_aged := true
 	var outs := []
-	for d in canal:
-		if d != from:
-			outs.append(d)
-	for layer in [[0.27, 0.45, Art.PATH_EDGE], [0.27, 0.42, Art.PATH]]:
-		if from == Vector2.ZERO:
-			for d: Vector2 in outs:
-				_band(mb, centre, centre + d * 0.25, centre + d * 0.5, layer[0], layer[1], z, z, z, layer[2])
-		elif outs.is_empty():
-			_band(mb, centre + from * 0.5, centre + from * 0.25, centre, layer[0], layer[1], z, z, z, layer[2])
+	var outs_aged := []
+	for i in canal.size():
+		if canal[i] == from:
+			from_aged = aged[i]
 		else:
-			for d: Vector2 in outs:
-				_band(mb, centre + from * 0.5, centre, centre + d * 0.5, layer[0], layer[1], z, z, z, layer[2])
+			outs.append(canal[i])
+			outs_aged.append(aged[i])
+	for layer in [[0.27, 0.45, Art.PATH_EDGE, CINDER_EDGE], [0.27, 0.42, Art.PATH, CINDER]]:
+		if from == Vector2.ZERO:
+			for i in outs.size():
+				var j := _join(c, Vector2i(outs[i]))
+				_band(mb, node, (node + j) * 0.5, j, layer[0], layer[1], z, z, z, layer[3] if outs_aged[i] else layer[2])
+		elif outs.is_empty():
+			var j := _join(c, Vector2i(from))
+			_band(mb, j, (node + j) * 0.5, node, layer[0], layer[1], z, z, z, layer[3] if from_aged else layer[2])
+		else:
+			for i in outs.size():
+				_band(mb, _join(c, Vector2i(from)), node, _join(c, Vector2i(outs[i])), layer[0], layer[1], z, z, z,
+					layer[3] if (from_aged and outs_aged[i]) else layer[2])
 
-	_stroke(mb, c, canal, CANAL_W + 0.085, Art.COPING, false)
+	_stroke(mb, c, canal, CANAL_W + 0.09, STONE_NEW, false, false, aged, BRICK_OLD)
+	_stroke(mb, c, canal, CANAL_W + 0.05, STONE_NEW.darkened(0.08), false, false, aged, Art.COPING)
 	_stroke(mb, c, canal, CANAL_W + 0.03, Art.WATER_EDGE, false)
 	_stroke(mb, c, canal, CANAL_W, Art.WATER, false)
 	_stroke(mb, c, canal, 0.06, Art.WATER.lightened(0.14), false)
 	if Art.rnd(c.x, c.y, 44) > 0.72 and canal.size() == 2 and not world.is_bridge(c):
-		Art.lilies(mb, centre, z, c.x + c.y * 3)
+		Art.lilies(mb, node, z, c.x + c.y * 3)
 
 	# Where the canal leaves the map, show the cut end on the edge of the slab.
 	if portal == Vector2i(1, 0) or portal == Vector2i(0, 1):
 		var side := Vector2(portal.y, portal.x) * CANAL_W
-		var e := centre + Vector2(portal) * 0.5
+		var e := _join(c, portal)
 		mb.quad(Art.iso(e - side, z), Art.iso(e + side, z), Art.iso(e + side, z - 8), Art.iso(e - side, z - 8),
 			Art.WATER_EDGE.darkened(0.1))
 
@@ -673,19 +736,18 @@ func _label_anchor(p: Dictionary) -> Vector2:
 # Things that must be drawn over a passing boat: bridges and lock gates.
 func _emit_over(c: Vector2i, mb: Art.MB) -> void:
 	var z := _zc(c)
-	var centre := Vector2(c) + Vector2(0.5, 0.5)
 	var land := world.link_dirs(c, [L.PATH, L.ROAD])
 	var over_river := _river_dirs.has(c) and not land.is_empty()
 	if world.is_bridge(c) or over_river:
-		var a := Vector2(land[0])
-		var b := Vector2(land[1]) if land.size() > 1 else -a
+		var p0 := _join(c, land[0])
+		var p1 := _join(c, land[1]) if land.size() > 1 else _node(c) * 2.0 - p0
 		var is_road := not world.link_dirs(c, [L.ROAD]).is_empty()
-		Art.bridge(mb, centre + a * 0.5, centre + b * 0.5, z, is_road, over_river and not world.has_water(c))
+		Art.bridge(mb, p0, p1, z, is_road, over_river and not world.has_water(c))
 	for pair in world.locks():
 		if pair[1] == c:
 			# The chamber is cut into the upper level, so it is drawn with this cell.
-			var down := Vector2(pair[0] - pair[1])
-			Art.lock(mb, centre + down * 0.5, -down.normalized(), _zc(pair[0]), z)
+			var uphill := (_node(c) - _node(pair[0])).normalized()
+			Art.lock(mb, _join(c, pair[0] - c), uphill, _zc(pair[0]), z)
 
 
 # --- Drawing ----------------------------------------------------------------
@@ -734,7 +796,7 @@ func _glint(c: Vector2i) -> void:
 	var hsh := Art.rnd(c.x, c.y, 7)
 	var ph := _t * 0.6 + hsh * TAU
 	var a := 0.16 + 0.16 * sin(ph * 1.7)
-	var p := Art.iso(Vector2(c) + Vector2(0.5 + 0.07 * sin(ph), 0.5 + 0.07 * cos(ph * 0.8)), _zc(c))
+	var p := Art.iso(_node(c) + Vector2(0.07 * sin(ph), 0.07 * cos(ph * 0.8)), _zc(c))
 	draw_line(p + Vector2(-5, 0), p + Vector2(5, 0), Color(1, 1, 1, a), 1.2)
 
 

@@ -226,6 +226,7 @@ static func _make(p: Dictionary) -> World:
 	if not road_cells.is_empty():
 		_site_places(world, rng, int(p.get("farms", 0)), road_cells, 2, 4, L.ROAD, ideal)
 	world.recompute()
+	_wander_nodes(world, rng)
 	return world
 
 
@@ -420,3 +421,17 @@ static func _site_places(world: World, rng: RandomNumberGenerator, count: int, a
 		world.bld_fixed[world.idx(c)] = 1
 		world.places.append({"cell": c, "kind": kind, "need": need, "name": label, "ok": false})
 		placed += 1
+
+
+# Old canals and lanes were never dead straight: nudge where they pass
+# through each cell so they wander a little.
+static func _wander_nodes(world: World, rng: RandomNumberGenerator) -> void:
+	var cells := world.adj.keys()
+	cells.sort()
+	for c: Vector2i in cells:
+		var off := Vector2(rng.randf_range(0.3, 0.7), rng.randf_range(0.3, 0.7))
+		var pinned := false
+		for p in world.portals:
+			pinned = pinned or p.cell == c
+		if not pinned and not world.open_ends.has(c):
+			world.offsets[c] = off

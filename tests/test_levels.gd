@@ -21,6 +21,19 @@ func _check(label: String, params: Dictionary) -> bool:
 	ok = ok and world.places.size() <= wanted and world.places.size() >= mini(wanted, 1)
 	ok = ok and world.linked == 1 and world.places_ok == 0 and world.charm == 0
 	var budget := world.coins
+	# Tapping old canal restores the whole unbroken stretch, and erasing puts it back.
+	for k in world.links.keys():
+		if world.links[k] == L.DERELICT:
+			var cell := world.key_cells(k)[0]
+			var run := world.derelict_run(cell).size()
+			var result := world.restore_run(cell)
+			ok = ok and run > 0 and result.err == "" and result.count == run and world.coins == budget - result.cost
+			ok = ok and world.derelict_run(cell).is_empty() and world.is_old(world.key_cells(k)[0], world.key_cells(k)[1])
+			for y in world.h:
+				for x in world.w:
+					world.erase(Vector2i(x, y))
+			ok = ok and world.coins == budget and world.links == again.links
+			break
 	# A sensible solution fits the budget and earns the first two stars.
 	ok = ok and AutoBuild.run(world) and world.all_linked() and world.stars() >= 2 and world.coins >= 0
 	var n := world.portals.size()

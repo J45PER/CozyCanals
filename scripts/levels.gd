@@ -5,7 +5,7 @@ extends RefCounted
 const JOURNEY := [
 	{"name": "The Old Cut", "seed": 11, "w": 18, "h": 13, "portals": 2, "derelict": 0.85, "places": 1,
 		"woods": 0.4, "budget": 1.7, "charm_goal": 12,
-		"blurb": "A forgotten canal lies silted up. Drag along it to dredge it, and fill in the gaps."},
+		"blurb": "A forgotten Victorian canal lies silted up. Tap a stretch to restore it, then drag to dig the gaps."},
 	{"name": "Willow Brook", "seed": 23, "w": 19, "h": 14, "portals": 2, "derelict": 0.5, "places": 2,
 		"river": true, "budget": 1.6, "charm_goal": 14,
 		"blurb": "Give the pub and the church a footpath to the towpath."},

@@ -76,15 +76,29 @@ func _run() -> void:
 	var world: World = main.world
 	var start_coins := world.coins
 
+	# Tap a stretch of old canal with the canal tool: the whole run is restored.
+	var old_cell := Vector2i(-1, -1)
+	for k in world.links:
+		if world.links[k] == L.DERELICT:
+			old_cell = world.key_cells(k)[0]
+			break
+	var run: int = world.derelict_run(old_cell).size()
+	await _drag([_screen(old_cell)])
+	_expect("tap restores a stretch of old canal", run > 0 and world.derelict_run(old_cell).is_empty() and world.coins < start_coins)
+
 	# Draw the whole canal by dragging a finger along a route, bends included.
 	var from: Vector2i = world.portals[0].cell
 	var target: Vector2i = world.portals[1].cell
 	var path := AutoBuild.route(world, from, func(c): return c == target, L.CANAL)
 	var points := []
 	for c in path:
-		points.append(_screen(c))
+		points.append(_screen(c) + Vector2(9, 3))   # deliberately off the middle of each cell
 	await _drag(points)
 	_expect("canal drawn by dragging", world.all_linked())
+	var off_centre := 0
+	for c in path:
+		off_centre += int(world.offsets.has(c) and world.offsets[c].distance_to(Vector2(0.5, 0.5)) > 0.05)
+	_expect("line follows the finger, not the grid", off_centre >= 2)
 	_expect("coins spent", world.coins < start_coins and world.spent == start_coins - world.coins)
 	var diagonal := false
 	for i in range(1, path.size()):

@@ -2,8 +2,8 @@
 //
 //   node tools/make_sprites.js            (needs Playwright with Chromium)
 //
-// Each sprite is built as layered SVG in the game's isometric projection,
-// given a hand-painted finish with SVG filters, and rasterised at 3x. The
+// Each sprite is built as layered SVG in the game's isometric projection:
+// flat vector shapes with gradients and ink outlines, rasterised at 3x. The
 // manifest (sprites.json) records each sprite's size and anchor: the point
 // in the image that sits on the centre of its map cell, at ground level.
 //
@@ -118,21 +118,10 @@ class Sprite {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${w * SCALE}" height="${h * SCALE}" viewBox="${x} ${y} ${w} ${h}">
 <defs>
 <filter id="blur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.6"/></filter>
-<filter id="paint" x="-4%" y="-4%" width="108%" height="108%" color-interpolation-filters="sRGB">
-  <feTurbulence type="fractalNoise" baseFrequency="0.11" numOctaves="2" seed="${seed}" result="wob"/>
-  <feDisplacementMap in="SourceGraphic" in2="wob" scale="0.9" xChannelSelector="R" yChannelSelector="G" result="ink"/>
-  <feTurbulence type="fractalNoise" baseFrequency="0.42" numOctaves="3" seed="${seed + 5}" result="grain"/>
-  <feColorMatrix in="grain" type="matrix" values="0 0 0 0 0.22  0 0 0 0 0.17  0 0 0 0 0.1  0.7 0 0 0 -0.3" result="speck"/>
-  <feComposite in="speck" in2="ink" operator="in" result="specks"/>
-  <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="${seed + 9}" result="wash"/>
-  <feColorMatrix in="wash" type="matrix" values="0 0 0 0 1  0 0 0 0 0.97  0 0 0 0 0.86  0 0.5 0 0 -0.2" result="bloom"/>
-  <feComposite in="bloom" in2="ink" operator="in" result="blooms"/>
-  <feMerge><feMergeNode in="ink"/><feMergeNode in="blooms"/><feMergeNode in="specks"/></feMerge>
-</filter>
 ${this.defs.join("\n")}
 </defs>
 ${this.back.join("\n")}
-<g filter="url(#paint)">
+<g>
 ${this.els.join("\n")}
 </g>
 </svg>`;

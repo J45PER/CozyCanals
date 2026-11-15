@@ -49,6 +49,7 @@ var links := {}       # edge key -> L
 var fixed := {}       # edge key -> true for links that came with the map
 var paid := {}        # edge key -> coins spent on it
 var restored := {}    # edge key -> true where derelict canal was restored
+var offsets := {}     # cell -> where in the cell (0..1) its lines meet; centre if absent
 
 var portals: Array = []     # [{cell, dir, name}] canals running off the map
 var places: Array = []      # [{cell, kind, need, name, ok}] to be connected
@@ -163,6 +164,71 @@ func land_links(c: Vector2i) -> int:
 	for e in adj.get(c, []):
 		n += int(e[1] == L.PATH or e[1] == L.ROAD)
 	return n
+
+
+## Where the lines through a cell meet, in map coordinates. Lines follow the
+## player's finger, so this is rarely the exact centre of the cell.
+func node(c: Vector2i) -> Vector2:
+	return Vector2(c) + offsets.get(c, Vector2(0.5, 0.5))
+
+
+## True if the cell has nothing on it yet, so a new line may place its node freely.
+func can_move_node(c: Vector2i) -> bool:
+	if not in_bounds(c) or building(c) != B.NONE or adj.has(c):
+		return false
+	for p in portals:
+		if p.cell == c:
+			return false
+	return true
+
+
+func set_offset(c: Vector2i, off: Vector2) -> void:
+	offsets[c] = off.clamp(Vector2(0.2, 0.2), Vector2(0.8, 0.8))
+	version += 1
+
+
+## True for canal that predates the player: the map's own, or restored derelict.
+func is_old(a: Vector2i, b: Vector2i) -> bool:
+	var k := key(a, b)
+	return fixed.has(k) or restored.has(k)
+
+
+## Every derelict link joined to `c` in one unbroken stretch: [[a, b], ...].
+func derelict_run(c: Vector2i) -> Array:
+	var out := []
+	var seen := {}
+	var queue: Array = [c]
+	var visited := {c: true}
+	var head := 0
+	while head < queue.size():
+		var cur: Vector2i = queue[head]
+		head += 1
+		for e in adj.get(cur, []):
+			if e[1] != L.DERELICT:
+				continue
+			var k := key(cur, e[0])
+			if not seen.has(k):
+				seen[k] = true
+				out.append([cur, e[0]])
+			if not visited.has(e[0]):
+				visited[e[0]] = true
+				queue.append(e[0])
+	return out
+
+
+## Restores the whole derelict stretch through `c`. Returns {count, cost, err}.
+func restore_run(c: Vector2i) -> Dictionary:
+	var run := derelict_run(c)
+	var total := 0
+	for pair in run:
+		total += _scaled(DREDGE_COST, pair[0].x != pair[1].x and pair[0].y != pair[1].y)
+	if run.is_empty():
+		return {"count": 0, "cost": 0, "err": "No old canal here to restore"}
+	if not unlimited and total > coins:
+		return {"count": 0, "cost": total, "err": "Restoring this stretch needs %d coins" % total}
+	for pair in run:
+		add_link(pair[0], pair[1], L.CANAL)
+	return {"count": run.size(), "cost": total, "err": ""}
 
 
 ## A path or road crossing over a canal.
@@ -342,6 +408,9 @@ func erase(c: Vector2i) -> bool:
 		removed = true
 	if removed:
 		recompute()
+		for d in DIRS8 + [Vector2i.ZERO]:
+			if not adj.has(c + d):
+				offsets.erase(c + d)
 	return removed
 
 

@@ -18,8 +18,8 @@ To play on a phone or tablet, use Godot's **one-click deploy** (Android) or
 ## How to play
 
 Canals run off the edge of the map at signposted points. Drag with the Canal
-tool to draw a line between them, in any direction; it is drawn as a smooth
-curve. Once two are joined, narrowboats pass through and each one earns coins.
+tool to draw a line between them; the line follows your finger. Tap a stretch
+of old, silted canal to restore the whole run at once. Once two are joined, narrowboats pass through and each one earns coins.
 
 | Tool | What it does | Cost |
 | --- | --- | --- |
@@ -31,6 +31,9 @@ curve. Once two are joined, narrowboats pass through and each one earns coins.
 | Erase | Removes what you built on a spot and refunds it in full | - |
 
 A path or road that crosses water gets a bridge automatically (+20).
+
+Restored canal keeps its Victorian look (brick edging, cinder towpath); newly
+dug cut has pale stone coping and a fresh gravel towpath.
 
 **Stars:** link every canal; connect every place (the badge over it shows
 whether it wants a path or a road); reach the charm goal.
