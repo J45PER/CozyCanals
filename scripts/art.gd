@@ -9,7 +9,7 @@ const B := World.B
 
 const HW := 36.0      # half cell width on screen
 const HH := 18.0      # half cell height on screen
-const HSTEP := 16.0   # screen pixels per terrain level
+const HSTEP := 26.0   # screen pixels per terrain level
 
 # Fields: pasture, meadow, wheat, cut hay, ploughed.
 const FIELD := [Color("9cbb6f"), Color("a9c47a"), Color("d6c27c"), Color("bfc883"), Color("b39672")]
@@ -58,6 +58,16 @@ class MB:
 		for i in range(1, pts.size() - 1):
 			tri(pts[0], pts[i], pts[i + 1], col)
 
+	## Convex polygon with a colour at each point, blended across it.
+	func fan_shaded(pts: PackedVector2Array, cols: PackedColorArray) -> void:
+		for i in range(1, pts.size() - 1):
+			v.append(pts[0])
+			v.append(pts[i])
+			v.append(pts[i + 1])
+			c.append(cols[0])
+			c.append(cols[i])
+			c.append(cols[i + 1])
+
 	func disc(o: Vector2, rx: float, ry: float, col: Color, n := 10) -> void:
 		var prev := o + Vector2(rx, 0)
 		for i in range(1, n + 1):
@@ -101,7 +111,7 @@ static func hazed(col: Color, fade: float) -> Color:
 	return col if fade <= 0.0 else col.lerp(MIST, fade)
 
 
-static func field_detail(mb: MB, o: Vector2, z: float, field: Dictionary, fade: float) -> void:
+static func field_detail(mb: MB, o: Vector2, ground: Callable, field: Dictionary, fade: float) -> void:
 	# Crops and plough lines run in straight rows across the field.
 	if field.kind != 2 and field.kind != 4:
 		return
@@ -111,12 +121,14 @@ static func field_detail(mb: MB, o: Vector2, z: float, field: Dictionary, fade: 
 	var tone := hazed(col.darkened(0.1), fade)
 	for j in 3:
 		var p := o + Vector2(0.5, 0.5) + across * (j - 1) * 0.3
-		mb.line(iso(p - dir * 0.34, z), iso(p + dir * 0.34, z), 1.2, tone)
+		var a := p - dir * 0.34
+		var b := p + dir * 0.34
+		mb.line(iso(a, ground.call(a) + 0.3), iso(b, ground.call(b) + 0.3), 1.2, tone)
 
 
-static func hedge(mb: MB, a: Vector2, b: Vector2, z: float, fade: float) -> void:
-	var pa := iso(a, z)
-	var pb := iso(b, z)
+static func hedge(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, fade: float) -> void:
+	var pa := iso(a, za)
+	var pb := iso(b, zb)
 	var up := Vector2(0, -5.0)
 	var side := (pb - pa).orthogonal().normalized() * 1.6
 	if side.y < 0.0:
@@ -127,9 +139,9 @@ static func hedge(mb: MB, a: Vector2, b: Vector2, z: float, fade: float) -> void
 	mb.disc(pb + up * 0.5, 2.6, 3.4, hazed(HEDGE, fade), 8)
 
 
-static func stone_wall(mb: MB, a: Vector2, b: Vector2, z: float, fade: float) -> void:
-	var pa := iso(a, z)
-	var pb := iso(b, z)
+static func stone_wall(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, fade: float) -> void:
+	var pa := iso(a, za)
+	var pb := iso(b, zb)
 	var up := Vector2(0, -4.0)
 	mb.quad(pa, pb, pb + up, pa + up, hazed(STONE.darkened(0.2), fade))
 	mb.line(pa + up, pb + up, 2.0, hazed(STONE, fade))

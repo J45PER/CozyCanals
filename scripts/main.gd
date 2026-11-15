@@ -106,6 +106,10 @@ var _last_f := Vector2.ZERO          # where the finger last was, in map coordin
 var _stroke_best := {}               # cell -> how near the finger has passed to its middle
 var _stroke_links := 0
 var _pinch_dist := 0.0
+var _pending := {}          # a finger that is down but not yet drawing: {pos}
+var _fling := Vector2.ZERO   # map glides on after a flick, in pixels per second
+var _pan_speed := Vector2.ZERO
+const DRAW_START := 10.0      # pixels a finger must move before it starts drawing
 var _pinch_mid := Vector2.ZERO
 var _was_joined := false
 var _celebrated := false
@@ -291,6 +295,7 @@ func _fit_view() -> void:
 func recentre() -> void:
 	if world == null:
 		return
+	_fling = Vector2.ZERO
 	var keep_s := view.scale
 	var keep_p := view.position
 	_fit_view()
@@ -327,7 +332,7 @@ func _clamp_view() -> void:
 	var vp := get_viewport_rect().size
 	var lo := view.position + b.position * view.scale.x
 	var hi := lo + b.size * view.scale.x
-	var margin := vp * 0.3
+	var margin := vp * 0.15
 	var shift := Vector2.ZERO
 	if hi.x < margin.x:
 		shift.x = margin.x - hi.x
@@ -343,6 +348,9 @@ func _clamp_view() -> void:
 func _process(delta: float) -> void:
 	if world == null:
 		return
+	if _fling.length() > 8.0:
+		_pan(_fling * delta)
+		_fling *= pow(0.04, delta)   # glide to a stop in about a second
 	view.refresh(Vector2i(-1, -1))   # catches changes not made through the tools
 	# Keep a little traffic moving between any portals that are joined up.
 	_next_boat -= delta
@@ -368,22 +376,32 @@ func _unhandled_input(event: InputEvent) -> void:
 		_pinch_dist = 0.0
 		if event.pressed:
 			_touches[event.index] = event.position
-			if _touches.size() == 1 and tool != T.PAN:
-				_painting = true
-				_last_cell = Vector2i(-1, -1)
-				_restored = [0, 0]
-				_use_tool(event.position, true)
+			_fling = Vector2.ZERO
+			_pan_speed = Vector2.ZERO
+			if _touches.size() == 1 and tool != T.PAN and world.in_bounds(_cell_under(event.position)):
+				# Wait to see whether this is a tap, a drag, or the first of two fingers.
+				_pending = {"pos": event.position}
 			else:
+				_pending = {}
+				if _painting:
+					_end_stroke()
 				_painting = false
 		else:
 			_touches.erase(event.index)
+			if not _pending.is_empty():
+				# A tap: use the tool once where the finger was.
+				_begin_stroke(_pending.pos)
+				_pending = {}
 			if _painting:
 				_end_stroke()
+			elif _touches.is_empty() and _pan_speed.length() > 120.0:
+				_fling = _pan_speed
 			_painting = false
 			view.hover = Vector2i(-1, -1)
 	elif event is InputEventScreenDrag:
 		_touches[event.index] = event.position
 		if _touches.size() >= 2:
+			_pending = {}
 			var pts := _touches.values()
 			var mid: Vector2 = (pts[0] + pts[1]) * 0.5
 			var dist: float = pts[0].distance_to(pts[1])
@@ -392,15 +410,26 @@ func _unhandled_input(event: InputEvent) -> void:
 				_zoom_at(mid, dist / _pinch_dist)
 			_pinch_dist = dist
 			_pinch_mid = mid
+		elif not _pending.is_empty():
+			if event.position.distance_to(_pending.pos) >= DRAW_START:
+				_begin_stroke(_pending.pos)
+				_pending = {}
+				_use_tool(event.position, false)
 		elif _painting:
 			_use_tool(event.position, false)
 		elif _touches.size() == 1:
 			_pan(event.relative)
+			var dt := maxf(get_process_delta_time(), 1.0 / 120.0)
+			_pan_speed = _pan_speed.lerp(event.relative / dt, 0.35)
 	elif event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_zoom_at(event.position, 1.1)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_zoom_at(event.position, 1.0 / 1.1)
+	elif event is InputEventMagnifyGesture:
+		_zoom_at(event.position, event.factor)
+	elif event is InputEventPanGesture:
+		_pan(-event.delta * 16.0)
 	elif event is InputEventMouseMotion:
 		if event.button_mask & (MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE):
 			_pan(event.relative)
@@ -409,16 +438,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		view.hover_ok = true
 
 
+func _begin_stroke(pos: Vector2) -> void:
+	_painting = true
+	_last_cell = Vector2i(-1, -1)
+	_restored = [0, 0]
+	_use_tool(pos, true)
+
+
 func _cell_under(screen_pos: Vector2) -> Vector2i:
 	return view.cell_at((screen_pos - view.position) / view.scale.x)
 
 
 # The point of the map under a finger, measured on the level of cell `c`.
-func _finger(screen_pos: Vector2, c: Vector2i) -> Vector2:
-	var local := (screen_pos - view.position) / view.scale.x
-	var a := local.x / WorldView.HW
-	var b := (local.y + world.height(c) * WorldView.HSTEP) / WorldView.HH
-	return Vector2((a + b) * 0.5, (b - a) * 0.5)
+func _finger(screen_pos: Vector2, _c: Vector2i) -> Vector2:
+	return view.map_at((screen_pos - view.position) / view.scale.x)
 
 
 func _use_tool(screen_pos: Vector2, first: bool) -> void:

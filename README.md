@@ -12,8 +12,9 @@ a way to reach the water.
 2. Open the editor, choose **Import**, and pick `project.godot` from this folder.
 3. Press **F5** to play.
 
-To play on a phone or tablet, use Godot's **one-click deploy** (Android) or
-**Project > Export** (Android / iOS) once the export templates are installed.
+**Android test build:** `builds/CozyCanals.apk`. Download it on the phone and
+open it to install (Android will ask you to allow installs from your browser
+or files app). Rebuild it with `tools/build_apk.sh`.
 
 ## How to play
 
