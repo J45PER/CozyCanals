@@ -1757,7 +1757,7 @@ func _emit_over(c: Vector2i, mb: Art.MB) -> void:
 			var p0 := _join(c, land[0])
 			var p1 := _join(c, land[1]) if land.size() > 1 else _node(c) * 2.0 - p0
 			var is_road := not world.link_dirs(c, [L.ROAD]).is_empty()
-			var plain := "wood" if (over_river and not world.has_water(c)) else "brick"
+			var plain := "stone" if (over_river and not world.has_water(c)) else "brick"
 			Art.bridge(mb, p0, p1, z, is_road, world.styles.get(c, plain))
 	var f: String = world.features.get(c, "")
 	if f.begins_with("lock_"):
@@ -1862,19 +1862,26 @@ func _make_bridge(chain: Array[Vector2i], exits: Array) -> void:
 			nearest = c
 	var tau := _water_tangent(nearest)
 	var half := _water_half(chain)
-	var d := Vector2(-tau.y, tau.x)
+	# The deck follows the road, whatever angle it meets the water at. It is
+	# longer the more slanted the crossing, so it still clears the water.
 	var run := (exit - entry).normalized()
-	if d.dot(run) < 0.0:
-		d = -d
-	if absf(d.dot(run)) < 0.3:
-		d = run
 	var wn := _node(nearest)
-	var centre := wn + tau * (mid - wn).dot(tau)
-	var span := 2.0 * half + 0.36
-	var a := centre - d * span * 0.5
-	var b := centre + d * span * 0.5
-	var app1 := _approach(entry, t_in, a, d)
-	var app2 := _approach(b, d, exit, t_out)
+	var cross := run.cross(tau)
+	var sin_t := maxf(absf(cross), 0.3)
+	var water_len := 2.0 * half / sin_t
+	var reach := entry.distance_to(exit)
+	var span := minf(water_len + 0.36, maxf(reach, 0.5))
+	# Centre it where the road crosses the middle of the water.
+	var centre := mid
+	if absf(cross) > 0.12:
+		centre = mid + run * clampf(-(mid - wn).cross(tau) / cross, -0.6, 0.6)
+	var slack := maxf((reach - span) * 0.5, 0.0)
+	centre = mid + run * clampf((centre - mid).dot(run), -slack, slack)
+	var a := centre - run * span * 0.5
+	var b := centre + run * span * 0.5
+	var open_frac := clampf(water_len / span, 0.35, 0.9)
+	var app1 := _approach(entry, t_in, a, run)
+	var app2 := _approach(b, run, exit, t_out)
 	var is_road := false
 	var line_style := "gravel"
 	for c in chain:
@@ -1894,24 +1901,23 @@ func _make_bridge(chain: Array[Vector2i], exits: Array) -> void:
 		if _ri(c) > _ri(owner):
 			owner = c
 	if style == "":
-		style = "wood" if all_river else "brick"
-	# The road's centreline over the whole crossing, with the deck humped.
+		style = "stone" if all_river else "brick"
+	# The road's centreline over the whole crossing, with the deck raised.
 	var pts := PackedVector2Array()
 	var zs := PackedFloat32Array()
-	var hump := (3.0 if style == "wood" else (9.0 if style == "brick" else 7.0)) * clampf(span / 0.7, 0.8, 1.7)
 	for q in app1:
 		pts.append(q)
 		zs.append(0.0)
 	for k in range(1, 9):
 		var u := k / 8.0
 		pts.append(a.lerp(b, u))
-		zs.append(hump * sin(u * PI))
-	for q in app2:
-		pts.append(q)
+		zs.append(Art.deck_z(style, span, u))
+	for k in range(1, app2.size()):
+		pts.append(app2[k])
 		zs.append(0.0)
 	var rec := {"cells": chain, "outside": [oa, ob], "a": a, "b": b, "app1": app1, "app2": app2, "pts": pts, "zs": zs,
-		"span": span, "is_road": is_road, "style": style, "line_style": line_style, "owner": owner,
-		"last_row": _ri(owner)}
+		"span": span, "open_frac": open_frac, "is_road": is_road, "style": style, "line_style": line_style,
+		"owner": owner, "last_row": _ri(owner)}
 	for c in chain:
 		_bridge_of[c] = _bridges.size()
 	_bridges.append(rec)
@@ -1920,6 +1926,9 @@ func _make_bridge(chain: Array[Vector2i], exits: Array) -> void:
 # A smooth S-curve from p0 (leaving along t0) to p1 (arriving along t1).
 func _approach(p0: Vector2, t0: Vector2, p1: Vector2, t1: Vector2) -> PackedVector2Array:
 	var out := PackedVector2Array()
+	if p0.distance_to(p1) < 0.02:
+		out.append(p0)      # the road meets the deck exactly: nothing to curve
+		return out
 	var k := p0.distance_to(p1) * 0.38
 	var c1 := p0 + t0 * k
 	var c2 := p1 - t1 * k
@@ -1959,7 +1968,7 @@ func _emit_bridge(br: Dictionary, mb: Art.MB) -> void:
 	var a: Vector2 = br.a
 	var b: Vector2 = br.b
 	_poly_band(mb, PackedVector2Array([a.lerp(b, 0.15), a.lerp(b, 0.85)]), st.edge, Color(0.1, 0.18, 0.2, 0.4), 0.5)
-	Art.bridge(mb, a, b, 0.0, br.is_road, br.style, br.span, st.edge)
+	Art.bridge(mb, a, b, 0.0, br.is_road, br.style, br.span, st.edge, br.open_frac)
 
 
 ## A ribbon of half-width `hw` along a list of points.

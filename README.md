@@ -31,7 +31,7 @@ at any time; the + / - / Fit buttons on the right zoom and bring the map back.
 | --- | --- | --- |
 | Restore | Tap or drag along silted old canal to restore that part of it | 4 a length |
 | Waterways | Canal (drag to dig), Moorings, Wide water (a winding hole), Stone lock, Brick lock (tap a plain canal; locks are decoration) | 12 a step, moorings 10, wide water 25, lock 15 |
-| Roads & Paths | Gravel path, Tarmac path, Dirt track, Lane, Road (with a white centre line), Roundabout (tap a junction of 3+ roads), Brick / Stone / Footbridge (tap a bridge to rebuild it) | 1 - 10 a step, roundabout 30, rebuild 10 |
+| Roads & Paths | Gravel path, Tarmac path, Dirt track, Lane, Road (with a white centre line), Roundabout (tap a junction of 3+ roads), Brick / Stone / Concrete bridge (tap a bridge to rebuild it) | 1 - 10 a step, roundabout 30, rebuild 10 |
 | Buildings | Cottage, Terrace, Shop, Cafe, Pub, Boatyard, Windmill, Car park, Beer garden | 15 - 70 |
 | Nature | Trees; Hedgerow, Stone wall, Fence (drag along a path or road to line both sides) | 2; 2 - 4 a length |
 | Bulldoze | Knock down what you built (half the cost back), clear trees (6), or knock down one of the map's buildings (40; it stops being a goal) | - |
@@ -57,7 +57,7 @@ with a gap and a front path or drive on the side its path or road arrives.
 Pubs, shops, cafes, farms, boatyards and manors get a car park once a road
 reaches them.
 
-A path or road that crosses water gets a bridge automatically (+20). A crossing is always one bridge, however many cells of water it spans: it meets the water square-on, is sized to the water's width, and the road or path curves on its approaches to meet it.
+A path or road that crosses water gets a bridge automatically (+20). A crossing is always one bridge, however many cells of water it spans. The deck follows the road at any angle (a slanting crossing gets a longer deck) and is sized to the water's width. Bridges are brick or stone arches, or a modern concrete beam bridge, and boats always pass under them.
 
 Restored canal keeps its Victorian look (brick edging, cinder towpath); newly
 dug cut has pale stone coping and a fresh gravel towpath.

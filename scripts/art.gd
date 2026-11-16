@@ -165,29 +165,52 @@ static func signpost(mb: MB, p: Vector2, z: float) -> void:
 
 # --- Canal structures -------------------------------------------------------
 
-## A bridge from p0 to p1 (where the path or road meets the water's banks).
-## style: "brick" humpback, "stone" arch, or "wood" plank footbridge.
-static func bridge(mb: MB, p0: Vector2, p1: Vector2, z: float, is_road: bool, style: String, span := 0.7, half_width := -1.0) -> void:
+## Height of a bridge deck above the water at `u` (0..1 along it), in pixels:
+## arches rise to a crown, a concrete bridge is a level slab on its abutments.
+static func deck_z(style: String, span: float, u: float) -> float:
+	var scale := clampf(span / 0.7, 0.85, 1.6)
+	if style == "concrete":
+		return 12.0 * smoothstep(0.0, 0.18, minf(u, 1.0 - u))
+	return (12.0 if style == "brick" else 11.0) * scale * sin(clampf(u, 0.0, 1.0) * PI)
+
+
+## A bridge from p0 to p1: a brick or stone arch, or a modern concrete beam
+## bridge. The deck follows the road in any direction (so it may cross the
+## water at a slant); `open_frac` is the part of its length that is over the
+## water. Under it there is nothing, so boats pass beneath.
+static func bridge(mb: MB, p0: Vector2, p1: Vector2, z: float, is_road: bool, style: String, span := 0.7,
+		half_width := -1.0, open_frac := 0.55) -> void:
 	var along := (p1 - p0).normalized()
 	var side := Vector2(-along.y, along.x) * (half_width if half_width > 0.0 else (0.17 if is_road else 0.11))
 	if side.x + side.y < 0.0:
 		side = -side          # `side` now points towards the camera
-	var wooden := style == "wood"
-	var wall: Color = {"brick": BRICK, "stone": Color("c3b8a0"), "wood": Color("8a6a45")}[style]
-	var deck := Color("b08a5c") if wooden else (ROAD if is_road else PATH)
-	var scale := clampf(span / 0.7, 0.8, 1.7)
-	var hump := (3.0 if wooden else (9.0 if style == "brick" else 7.0)) * scale
-	var steps := 8
+	var concrete := style == "concrete"
+	var wall: Color = {"brick": BRICK, "stone": Color("c3b8a0"), "concrete": Color("bdbcb6")}[style]
+	var deck := ROAD if is_road else PATH
+	var steps := 14
+	var lo := int(round(steps * (1.0 - open_frac) * 0.5))
+	var hi := steps - lo
+	var beam := 3.5 if not concrete else 4.0
 	var prof := []
 	for i in steps + 1:
 		var t := float(i) / steps
-		prof.append([p0.lerp(p1, 0.08 + t * 0.84), sin(t * PI) * hump])
-	# Far parapet, deck, then the near wall with its arch.
+		prof.append([p0.lerp(p1, 0.04 + t * 0.92), deck_z(style, span, t)])
+	# How high the opening reaches under the deck at each point.
+	var rise := []
+	for i in steps + 1:
+		var r := 0.0
+		if i >= lo and i <= hi:
+			if concrete:
+				r = prof[i][1] - beam
+			else:
+				r = deck_z(style, span, float(i - lo) / maxf(hi - lo, 1)) * 0.8
+		rise.append(maxf(r, 0.0))
+	# Far parapet, then the deck, then the near wall with the opening.
 	for i in steps:
 		var a: Vector2 = prof[i][0] - side
 		var b: Vector2 = prof[i + 1][0] - side
 		mb.quad(iso(a, z + prof[i][1]), iso(b, z + prof[i + 1][1]),
-			iso(b, z + prof[i + 1][1] + 3.5), iso(a, z + prof[i][1] + 3.5), wall.darkened(0.25))
+			iso(b, z + prof[i + 1][1] + 3.0), iso(a, z + prof[i][1] + 3.0), wall.darkened(0.25))
 	for i in steps:
 		var a: Vector2 = prof[i][0]
 		var b: Vector2 = prof[i + 1][0]
@@ -196,23 +219,21 @@ static func bridge(mb: MB, p0: Vector2, p1: Vector2, z: float, is_road: bool, st
 	for i in steps:
 		var a: Vector2 = prof[i][0] + side
 		var b: Vector2 = prof[i + 1][0] + side
-		var top_a: float = prof[i][1] + 3.5
-		var top_b: float = prof[i + 1][1] + 3.5
-		if wooden:
-			mb.line(iso(a, z + top_a), iso(b, z + top_b), 1.4, wall)
-			mb.line(iso(a, z), iso(a, z + top_a), 1.4, wall.darkened(0.2))
-			continue
-		# The near wall, with an open arch over the water: below the arch's
-		# curve there is nothing, so a boat underneath shows through.
-		var rise_a := 0.0
-		var rise_b := 0.0
-		if i >= 2 and i <= 5:
-			rise_a = sin((i - 2) / 4.0 * PI) * 6.0 * scale
-			rise_b = sin((i - 1) / 4.0 * PI) * 6.0 * scale
-		mb.quad(iso(a, z + rise_a), iso(b, z + rise_b), iso(b, z + top_b), iso(a, z + top_a), wall)
-		if i >= 2 and i <= 5:
-			mb.line(iso(a, z + rise_a), iso(b, z + rise_b), 1.2, wall.darkened(0.3))
-		mb.line(iso(a, z + top_a), iso(b, z + top_b), 1.6, STONE if style == "brick" else wall.lightened(0.2))
+		var top_a: float = prof[i][1] + (3.0 if not concrete else 4.0)
+		var top_b: float = prof[i + 1][1] + (3.0 if not concrete else 4.0)
+		mb.quad(iso(a, z + rise[i]), iso(b, z + rise[i + 1]), iso(b, z + top_b), iso(a, z + top_a), wall)
+		if i >= lo and i < hi:
+			mb.line(iso(a, z + rise[i]), iso(b, z + rise[i + 1]), 1.2, wall.darkened(0.32))
+		mb.line(iso(a, z + top_a), iso(b, z + top_b), 1.6, wall.lightened(0.18))
+	if concrete:
+		# Slim railings along both edges of the slab.
+		for sd: float in [-1.0, 1.0]:
+			for i in range(0, steps + 1, 2):
+				var q: Vector2 = prof[i][0] + side * sd
+				mb.line(iso(q, z + prof[i][1] + 4.0), iso(q, z + prof[i][1] + 7.0), 1.0, Color("e8e6df"))
+			var qa: Vector2 = prof[0][0] + side * sd
+			var qb: Vector2 = prof[steps][0] + side * sd
+			mb.line(iso(qa, z + prof[0][1] + 7.0), iso(qb, z + prof[steps][1] + 7.0), 1.0, Color("e8e6df"))
 
 
 ## A lock, as decoration on level ground: stone or Victorian-brick walls along

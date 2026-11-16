@@ -220,6 +220,29 @@ func _run() -> void:
 		if main.world.has_bridge(c) and not v._bridge_of.has(c):
 			loose += 1
 	_expect("every crossing is one bridge", loose == 0)
+	# Bridges follow the road at any angle: the deck points along the road,
+	# never across it, and the road meets it without a sharp turn. Every style
+	# leaves an opening for boats to pass under.
+	var crooked := 0
+	var sharp := 0
+	var styles_ok := true
+	for br in v._bridges:
+		var deck: Vector2 = ((br.b as Vector2) - (br.a as Vector2)).normalized()
+		var pts: PackedVector2Array = br.pts
+		var road := (pts[pts.size() - 1] - pts[0]).normalized()
+		if deck.dot(road) < 0.94:
+			crooked += 1
+		for k in range(1, pts.size() - 1):
+			if pts[k].distance_to(pts[k - 1]) < 0.001 or pts[k + 1].distance_to(pts[k]) < 0.001:
+				continue
+			var t0 := (pts[k] - pts[k - 1]).normalized()
+			var t1 := (pts[k + 1] - pts[k]).normalized()
+			if t0.dot(t1) < 0.5:
+				sharp += 1
+		styles_ok = styles_ok and br.style in ["brick", "stone", "concrete"] and br.open_frac >= 0.35
+	print("  bridges: %d, crooked %d, sharp corners %d" % [v._bridges.size(), crooked, sharp])
+	_expect("bridge decks follow the road", v._bridges.size() > 0 and crooked == 0 and sharp == 0)
+	_expect("bridges are stone, brick or concrete, with room underneath", styles_ok)
 
 	print("PASS" if ok else "FAIL")
 	quit(0 if ok else 1)

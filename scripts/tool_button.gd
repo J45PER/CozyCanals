@@ -140,14 +140,14 @@ func _draw() -> void:
 				draw_rect(Rect2(c + Vector2(x - 2, -8), Vector2(4, 18)), Color("3a2f27"))
 				draw_line(c + Vector2(x, -12), c + Vector2(x - 12, -16), Color("26211e"), 3.0)
 				draw_line(c + Vector2(x - 9, -15.3), c + Vector2(x - 12, -16), Color("f4efe2"), 3.0)
-		T.BRIDGE_BRICK, T.BRIDGE_STONE, T.BRIDGE_WOOD:
-			var wall: Color = {T.BRIDGE_BRICK: Color("ab5a43"), T.BRIDGE_STONE: Color("c3b8a0"), T.BRIDGE_WOOD: Color("8a6a45")}[tool_id]
+		T.BRIDGE_BRICK, T.BRIDGE_STONE, T.BRIDGE_CONCRETE:
+			var wall: Color = {T.BRIDGE_BRICK: Color("ab5a43"), T.BRIDGE_STONE: Color("c3b8a0"), T.BRIDGE_CONCRETE: Color("bdbcb6")}[tool_id]
 			draw_rect(Rect2(c + Vector2(-24, 6), Vector2(48, 8)), Color("6aa3a8"))
-			if tool_id == T.BRIDGE_WOOD:
-				draw_line(c + Vector2(-24, 3), c + Vector2(24, 3), wall, 4.0)
-				draw_line(c + Vector2(-22, -5), c + Vector2(22, -5), wall, 2.0)
-				for x: float in [-18.0, 0.0, 18.0]:
-					draw_line(c + Vector2(x, -5), c + Vector2(x, 12), wall.darkened(0.2), 2.0)
+			if tool_id == T.BRIDGE_CONCRETE:
+				draw_rect(Rect2(c + Vector2(-26, -6), Vector2(52, 7)), wall)
+				draw_rect(Rect2(c + Vector2(-26, -6), Vector2(8, 20)), wall)
+				draw_rect(Rect2(c + Vector2(18, -6), Vector2(8, 20)), wall)
+				draw_line(c + Vector2(-26, -9), c + Vector2(26, -9), Color("e8e6df"), 1.5)
 			else:
 				var arch := PackedVector2Array([c + Vector2(-26, 12), c + Vector2(-16, -4), c + Vector2(0, -9),
 					c + Vector2(16, -4), c + Vector2(26, 12), c + Vector2(13, 12), c + Vector2(9, 5),

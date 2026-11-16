@@ -13,7 +13,7 @@ enum T { GRASS, WOOD, ROCK, RIVER, VOID }
 enum L { CANAL, DERELICT, PATH, ROAD }
 enum B { NONE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, CHURCH, FARM, MANOR, CARPARK, GARDEN }
 enum Tool { PAN, CANAL, PATH, ROAD, TREE, COTTAGE, TERRACE, SHOP, CAFE, PUB, BOATYARD, WINDMILL, ERASE,
-	RESTORE, LOCK_BRICK, LOCK_STONE, BRIDGE_BRICK, BRIDGE_STONE, BRIDGE_WOOD,
+	RESTORE, LOCK_BRICK, LOCK_STONE, BRIDGE_BRICK, BRIDGE_STONE, BRIDGE_CONCRETE,
 	ROAD_WIDE, PATH_TARMAC, PATH_DIRT, ROUNDABOUT, HEDGE_ROW, WALL_ROW, FENCE_ROW,
 	CARPARK, GARDEN, MOORINGS, BASIN }
 
@@ -63,7 +63,7 @@ const PLACE_DEMOLISH_COST := 40
 const STYLE_COST := 10
 ## Tools that rebuild an existing bridge in another style.
 const STYLE_TOOLS := {
-	Tool.BRIDGE_BRICK: ["bridge", "brick"], Tool.BRIDGE_STONE: ["bridge", "stone"], Tool.BRIDGE_WOOD: ["bridge", "wood"],
+	Tool.BRIDGE_BRICK: ["bridge", "brick"], Tool.BRIDGE_STONE: ["bridge", "stone"], Tool.BRIDGE_CONCRETE: ["bridge", "concrete"],
 }
 const BRIDGE_CHARM := 3
 
@@ -84,7 +84,7 @@ var fixed := {}       # edge key -> true for links that came with the map
 var paid := {}        # edge key -> coins spent on it
 var restored := {}    # edge key -> true where derelict canal was restored
 var offsets := {}     # cell -> where in the cell (0..1) its lines meet; centre if absent
-var styles := {}      # cell -> "brick", "stone" or "wood" for a lock or bridge rebuilt by the player
+var styles := {}      # cell -> "brick", "stone" or "concrete" for a bridge rebuilt by the player
 var style_paid := {}  # cell -> coins spent restyling it
 var link_style := {}  # edge key -> path or road surface ("gravel", "lane", ...)
 var verges := {}      # edge key -> "hedge", "wall" or "fence" lining a path or road
