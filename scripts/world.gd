@@ -290,6 +290,33 @@ func has_bridge(c: Vector2i) -> bool:
 	return is_bridge(c) or (terrain_at(c) == T.RIVER and land_links(c) > 0)
 
 
+## True for a path link running along a canal, on the towpath side: it lies
+## within 30 degrees of the canal at each end that has water, so it is a walk
+## beside the water rather than a crossing.
+func is_towpath_link(a: Vector2i, b: Vector2i) -> bool:
+	var v := node(b) - node(a)
+	var wet := false
+	for c: Vector2i in [a, b]:
+		if terrain_at(c) == T.RIVER:
+			return false
+		if has_water(c):
+			wet = true
+			for u in water_axes(c):
+				if square_enough(v, u):
+					return false
+	return wet
+
+
+## Paths and roads at `c` that cross the water there (not towpath walks).
+func crossing_links(c: Vector2i) -> int:
+	var n := 0
+	for e in adj.get(c, []):
+		if e[1] == L.PATH and is_towpath_link(c, e[0]):
+			continue
+		n += int(e[1] == L.PATH or e[1] == L.ROAD)
+	return n
+
+
 ## Rebuilds the bridge at `c` in the tool's style. Returns "" or why not.
 func restyle(tool: int, c: Vector2i) -> String:
 	var style: String = STYLE_TOOLS[tool][1]
@@ -323,7 +350,7 @@ func restore_run(c: Vector2i) -> Dictionary:
 
 ## A path or road crossing over a canal.
 func is_bridge(c: Vector2i) -> bool:
-	return has_water(c) and land_links(c) >= 2
+	return has_water(c) and crossing_links(c) >= 2
 
 
 ## Roads and paths must cross water at least this steeply (sine of 30 degrees).
@@ -361,9 +388,11 @@ static func square_enough(v: Vector2, u: Vector2) -> bool:
 ## or b, or "".
 func crossing_error(a: Vector2i, b: Vector2i, type: int) -> String:
 	var v := node(b) - node(a)
+	if type == L.PATH and is_towpath_link(a, b):
+		return ""          # a walk along the canal bank
 	for c: Vector2i in [a, b]:
 		var wet := has_water(c) or terrain_at(c) == T.RIVER
-		if (type == L.PATH or type == L.ROAD) and wet and land_links(c) >= 2:
+		if (type == L.PATH or type == L.ROAD) and wet and crossing_links(c) >= 2:
 			return "A bridge can't have a junction on it"
 		if type == L.CANAL and land_links(c) >= 3:
 			return "Water can't run under a junction"
@@ -372,8 +401,9 @@ func crossing_error(a: Vector2i, b: Vector2i, type: int) -> String:
 				if not square_enough(v, u):
 					return "Cross the water more squarely - at least 30 degrees"
 		elif type == L.CANAL:
-			for u in land_axes(c):
-				if not square_enough(v, u):
+			# Canal may run beside a path (a towpath), but must cross a road squarely.
+			for e in adj.get(c, []):
+				if e[1] == L.ROAD and not square_enough(v, node(e[0]) - node(c)):
 					return "A bridge needs the water to cross the road at 30 degrees or more"
 	return ""
 
@@ -437,12 +467,13 @@ func check_link(a: Vector2i, b: Vector2i, type: int, style := "") -> Dictionary:
 		var both_river := terrain_at(a) == T.RIVER and terrain_at(b) == T.RIVER
 		var base: int = DREDGE_COST + 1 if (type == L.CANAL and both_river) else STYLE_LINK_COST.get(style, LINK_COST[type])
 		r.cost = _scaled(base, diagonal)
+		var towpath := type == L.PATH and is_towpath_link(a, b)
 		for c: Vector2i in [a, b]:
 			if type == L.CANAL:
-				if not has_water(c) and land_links(c) >= 2:
+				if not has_water(c) and crossing_links(c) >= 2:
 					r.cost += BRIDGE_COST
-			else:
-				if has_water(c) and land_links(c) == 1:
+			elif not towpath:
+				if has_water(c) and crossing_links(c) == 1:
 					r.cost += BRIDGE_COST
 				if terrain_at(c) == T.RIVER and land_links(c) == 0:
 					r.cost += BRIDGE_COST

@@ -39,8 +39,8 @@ const BRICK_MOSSY := Color("857a5c")
 const STONE_NEW := Color("e2dccb")       # freshly laid coping
 const CINDER := Color("b9ab92")          # old towpath
 const CINDER_EDGE := Color("8f826b")
-const BOAT_SPEED := 1.3         # cells a second
-const CAR_SPEED := 2.4
+const BOAT_SPEED := 0.8         # cells a second
+const CAR_SPEED := 1.5
 const MAX_CARS := 4
 const BOAT_SCALE := 0.7        # boats are drawn smaller than the sprite's natural size
 ## Paths and roads: half-widths of the verge/edge and the surface, colours,
@@ -409,10 +409,18 @@ func clear_boats() -> void:
 ## Sends a boat along `path`, arriving from the distance and leaving the same way.
 func spawn_boat(path: Array[Vector2i], dir_in: Vector2i, dir_out: Vector2i) -> void:
 	var cells: Array[Vector2i] = []
-	for k in range(BOAT_RUN, 0, -1):
+	# Boats arrive and leave over the countryside beyond the water's end, but never
+	# across other land: stop where the straight line meets the map again.
+	var run_in := 0
+	while run_in < BOAT_RUN and not world.in_bounds(path[0] + dir_in * (run_in + 1)):
+		run_in += 1
+	var run_out := 0
+	while run_out < BOAT_RUN and not world.in_bounds(path[path.size() - 1] + dir_out * (run_out + 1)):
+		run_out += 1
+	for k in range(run_in, 0, -1):
 		cells.append(path[0] + dir_in * k)
 	cells.append_array(path)
-	for k in range(1, BOAT_RUN + 1):
+	for k in range(1, run_out + 1):
 		cells.append(path[path.size() - 1] + dir_out * k)
 	var track := _track(cells, false)
 	track.look = randi() % maxi(Sprites.boat_liveries, 1)
@@ -1226,6 +1234,8 @@ func _land_lines(c: Vector2i) -> Array:
 	var out := []
 	for e in world.adj.get(c, []):
 		if e[1] == L.PATH or e[1] == L.ROAD:
+			if e[1] == L.PATH and world.has_water(c) and world.is_towpath_link(c, e[0]):
+				continue      # a walk along the canal: the towpath beside the water is drawn instead
 			var k := world.key(c, e[0])
 			out.append([Vector2(e[0] - c), world.link_style.get(k, "lane" if e[1] == L.ROAD else "gravel"), k])
 	if world.exits.has(c):
@@ -1404,7 +1414,7 @@ func _emit_moorings(c: Vector2i, mb: Art.MB, sprites: Array) -> void:
 		var base := Art.iso(p, z)
 		mb.line(base, base + Vector2(0, -3.4), 2.2, Color("26211e"))
 		mb.disc(base + Vector2(0, -3.4), 1.6, 0.9, Color("3a332c"), 8)
-	var heading := int(round(atan2(t.y, t.x) / TAU * Sprites.boat_directions))
+	var heading := Art.boat_heading(t, Sprites.boat_directions)
 	var name := Sprites.boat((c.x * 7 + c.y) % maxi(Sprites.boat_liveries, 1), heading)
 	var at := node + side * 0.11
 	if Sprites.has(name):
@@ -1886,6 +1896,18 @@ func _make_bridge(chain: Array[Vector2i], exits: Array) -> void:
 	var centre := mid
 	if absf(cross) > 0.12:
 		centre = mid + run * clampf(-(mid - wn).cross(tau) / cross, -0.6, 0.6)
+	# Better still, find where the road really meets the water's centre line.
+	var water_line := _water_segments(chain)
+	if not water_line.is_empty():
+		var best_d := INF
+		for k in range(-12, 61):
+			var q := entry + run * (reach * (k / 48.0))
+			var dq := INF
+			for sg in water_line:
+				dq = minf(dq, q.distance_to(Geometry2D.get_closest_point_to_segment(q, sg[0], sg[1])))
+			if dq < best_d - 0.001:
+				best_d = dq
+				centre = q
 	var slack := maxf((reach - span) * 0.5, 0.0)
 	centre = mid + run * clampf((centre - mid).dot(run), -slack, slack)
 	var a := centre - run * span * 0.5
@@ -1947,6 +1969,18 @@ func _approach(p0: Vector2, t0: Vector2, p1: Vector2, t1: Vector2) -> PackedVect
 		var t := i / 8.0
 		var u := 1.0 - t
 		out.append(u * u * u * p0 + 3.0 * u * u * t * c1 + 3.0 * u * t * t * c2 + t * t * t * p1)
+	return out
+
+
+# The centre lines of the water under a crossing: node to node along each link.
+func _water_segments(chain: Array[Vector2i]) -> Array:
+	var out := []
+	for c in chain:
+		for e in world.adj.get(c, []):
+			if e[1] == L.CANAL or e[1] == L.DERELICT:
+				out.append([_node(c), _node(e[0])])
+		for n in world.river_next.get(c, []):
+			out.append([_node(c), _node(n)])
 	return out
 
 
@@ -2089,7 +2123,7 @@ func _draw_boat(st: Dictionary) -> void:
 	for j in 3:
 		draw_circle(Art.iso(flat - dir * ((0.6 + j * 0.12) * BOAT_SCALE), pos.z + 1.0), (3.6 - j * 0.8) * BOAT_SCALE, Color(1, 1, 1, (0.26 - j * 0.07) * alpha))
 	# The sprite set has the boat drawn from a ring of headings; use the nearest.
-	var heading := int(round(atan2(dir.y, dir.x) / TAU * Sprites.boat_directions))
+	var heading := Art.boat_heading(dir, Sprites.boat_directions)
 	var name := Sprites.boat(st.look, heading)
 	if Sprites.has(name):
 		var tint := Color.WHITE.lerp(Art.MIST, fade * 0.8)

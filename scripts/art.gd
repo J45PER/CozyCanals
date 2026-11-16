@@ -103,6 +103,17 @@ static func iso(p: Vector2, z: float) -> Vector2:
 	return Vector2(p.x * HW, p.y * HH - z)
 
 
+## Which of the boat sprites to draw for a boat heading along `dir` (map
+## coordinates). The sprites were drawn for a 2:1 diagonal view, so find the
+## heading whose drawn direction on screen matches the direction the boat goes
+## on this front-on screen.
+static func boat_heading(dir: Vector2, directions := 32) -> int:
+	var s := Vector2(dir.x * HW, dir.y * HH)
+	var a := (s.x / 36.0 + s.y / 18.0) * 0.5
+	var b := (s.y / 18.0 - s.x / 36.0) * 0.5
+	return posmod(int(round(atan2(b, a) / TAU * directions)), directions)
+
+
 ## Repeatable pseudo-random number in 0..1.
 static func rnd(x: int, y: int, seed := 0) -> float:
 	var n := (x * 73856093) ^ (y * 19349663) ^ (seed * 83492791)

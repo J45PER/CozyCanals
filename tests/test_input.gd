@@ -171,7 +171,7 @@ func _run() -> void:
 
 	# Boats pass through, pay out, and the level completes and is saved.
 	coins = world.coins
-	await create_timer(26.0).timeout
+	await create_timer(45.0).timeout
 	_expect("boat passed through and paid", world.coins > coins)
 	# The level ends when the player says so (or every goal is met): stars lock in.
 	_expect("finish is offered once the canal is open", not main._finish_btn.disabled and not main.world.finished)

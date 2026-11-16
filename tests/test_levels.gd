@@ -164,7 +164,10 @@ func _init() -> void:
 	angles = angles and tiny.add_link(Vector2i(6, 4), Vector2i(7, 5), L.PATH) == ""
 	var junction := tiny.add_link(Vector2i(2, 3), Vector2i(3, 4), L.PATH)
 	angles = angles and junction != "" and junction != "same"
-	var along := tiny.add_link(Vector2i(0, 4), Vector2i(1, 4), L.PATH)
+	var along := tiny.add_link(Vector2i(0, 4), Vector2i(1, 4), L.ROAD)
+	# A footpath may run along a canal (a towpath): it is not a bridge.
+	var towpath_ok := tiny.add_link(Vector2i(7, 4), Vector2i(8, 4), L.PATH) == "" and not tiny.is_bridge(Vector2i(7, 4)) and tiny.is_towpath_link(Vector2i(7, 4), Vector2i(8, 4))
+	angles = angles and towpath_ok
 	var along_land := tiny.add_link(Vector2i(2, 3), Vector2i(2, 4), L.CANAL)
 	angles = angles and along != "" and along != "same"
 	# A path drawn along a road becomes a pavement, and goes when the road does.
