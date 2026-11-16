@@ -118,21 +118,6 @@ static func hazed(col: Color, fade: float) -> Color:
 	return col if fade <= 0.0 else col.lerp(MIST, fade)
 
 
-static func field_detail(mb: MB, o: Vector2, ground: Callable, field: Dictionary, fade: float) -> void:
-	# Crops and plough lines run in straight rows across the field.
-	if field.kind != 2 and field.kind != 4:
-		return
-	var col: Color = field.col
-	var dir := Vector2.from_angle(field.angle)
-	var across := Vector2(-dir.y, dir.x)
-	var tone := hazed(col.darkened(0.1), fade)
-	for j in 3:
-		var p := o + Vector2(0.5, 0.5) + across * (j - 1) * 0.3
-		var a := p - dir * 0.34
-		var b := p + dir * 0.34
-		mb.line(iso(a, ground.call(a) + 0.3), iso(b, ground.call(b) + 0.3), 1.2, tone)
-
-
 static func hedge(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, fade: float) -> void:
 	var pa := iso(a, za)
 	var pb := iso(b, zb)
@@ -142,8 +127,6 @@ static func hedge(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, fade: fl
 		side = -side
 	mb.quad(pa - side, pb - side, pb + side + up, pa + side + up, hazed(HEDGE, fade))
 	mb.quad(pa - side + up, pb - side + up, pb + side + up, pa + side + up, hazed(HEDGE_LIGHT, fade))
-	mb.disc(pa + up * 0.5, 2.6, 3.4, hazed(HEDGE, fade), 8)
-	mb.disc(pb + up * 0.5, 2.6, 3.4, hazed(HEDGE, fade), 8)
 
 
 static func stone_wall(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, fade: float, col := STONE) -> void:
@@ -174,27 +157,6 @@ static func fence(mb: MB, a: Vector2, b: Vector2, za: float, zb: float, col: Col
 	for i in range(0 if first_post else 1, n + 1):
 		var p := pa.lerp(pb, float(i) / n)
 		mb.line(p, p + Vector2(0, -5.6), 1.3, col)
-
-
-static func reeds(mb: MB, p: Vector2, z: float) -> void:
-	for j in 3:
-		var base := iso(p + Vector2(j * 0.04, j * 0.02), z)
-		mb.tri(base + Vector2(-1.0, 0), base + Vector2(1.0, 0), base + Vector2(0.5 * (j - 1), -7.0 - j), Color("5c8246"))
-
-
-static func stone(mb: MB, p: Vector2, z: float) -> void:
-	mb.disc(iso(p, z), 4.0, 2.4, STONE.darkened(0.15), 8)
-
-
-static func lilies(mb: MB, p: Vector2, z: float, seed: int) -> void:
-	for j in 2:
-		var q := iso(p + Vector2(rnd(seed, j, 1) - 0.5, rnd(seed, j, 2) - 0.5) * 0.2, z)
-		mb.disc(q, 2.8, 1.6, Color("6f9a55"), 8)
-
-
-static func weeds(mb: MB, p: Vector2, z: float) -> void:
-	mb.disc(iso(p, z), 6.5, 3.2, Color("7c9a55"), 10)
-	reeds(mb, p + Vector2(0.06, 0.08), z)
 
 
 static func signpost(mb: MB, p: Vector2, z: float) -> void:
@@ -252,44 +214,40 @@ static func bridge(mb: MB, p0: Vector2, p1: Vector2, z: float, is_road: bool, st
 		mb.line(iso(a, z + top_a), iso(b, z + top_b), 1.6, STONE if style == "brick" else wall.lightened(0.2))
 
 
-## A lock between two levels, in "stone" or Victorian "brick". `mid` is the
-## point where the levels meet and `dir` points uphill. The chamber is cut into the upper level: a stone-edged
-## basin of deep water with tall bottom gates on the drop and top gates above.
-static func lock(mb: MB, mid: Vector2, dir: Vector2, z_low: float, z_high: float, style := "stone") -> void:
-	var edge := STONE if style == "stone" else Color("a8604a")
-	var side := Vector2(-dir.y, dir.x)
-	if side.x + side.y < 0.0:
-		side = -side
-	var head := mid + dir * 0.44
-	var hw := 0.2
-	var rim := hw + 0.075
-	# Stone surround, then the chamber: far wall in shadow and water well below.
-	mb.quad(iso(mid - side * rim, z_high), iso(head - side * rim, z_high),
-		iso(head + side * rim, z_high), iso(mid + side * rim, z_high), edge)
-	mb.quad(iso(mid - side * hw, z_high), iso(head - side * hw, z_high),
-		iso(head + side * hw, z_high), iso(mid + side * hw, z_high), edge.darkened(0.45))
-	var sink := minf(z_high - z_low, 7.0)
-	mb.quad(iso(mid - side * hw * 0.55, z_high - sink), iso(head - side * hw * 0.55, z_high - sink),
-		iso(head + side * hw, z_high - sink), iso(mid + side * hw, z_high - sink), WATER_EDGE.darkened(0.1))
-	# The drop itself: a stone face with the tall bottom gates closed across it.
-	mb.quad(iso(mid - side * rim, z_low), iso(mid + side * rim, z_low),
-		iso(mid + side * rim, z_high), iso(mid - side * rim, z_high), edge.darkened(0.2))
-	mb.quad(iso(mid - side * hw, z_low), iso(mid + side * hw, z_low),
-		iso(mid + side * hw, z_high + 2.0), iso(mid - side * hw, z_high + 2.0), TIMBER)
-	mb.line(iso(mid, z_low), iso(mid, z_high + 2.0), 1.0, Color("5a4a3e"))
-	mb.line(iso(mid - side * hw * 0.5, z_high - 3.0), iso(mid - side * hw * 0.5, z_low + 1.0), 1.6, Color(1, 1, 1, 0.5))
-	# Top gates at the head of the chamber.
-	mb.quad(iso(head - side * hw, z_high - 1.0), iso(head + side * hw, z_high - 1.0),
-		iso(head + side * hw, z_high + 3.0), iso(head - side * hw, z_high + 3.0), TIMBER)
-	# Balance beams on both pairs: black with white ends, angled back along the lock side.
-	for gate in [[mid, 1.0], [head, 1.0]]:
-		var g: Vector2 = gate[0]
-		for s: float in [-1.0, 1.0]:
-			var a := iso(g + side * hw * 0.2 * s, z_high + 4.0)
-			var b := iso(g + side * (rim + 0.13) * s + dir * 0.06, z_high + 4.0)
-			mb.line(a, b, 2.6, Color("26211e"))
-			mb.line(b, b.lerp(a, 0.28), 2.6, Color("f4efe2"))
-	# Bollards on the lockside.
-	for t: float in [0.12, 0.34]:
-		var p := iso(mid + dir * t + side * (rim - 0.025), z_high)
-		mb.line(p, p + Vector2(0, -3.0), 1.8, Color("26211e"))
+## A lock, as decoration on level ground: stone or Victorian-brick walls along
+## both sides of the canal for a short length, with open gates against them.
+static func lock_rim(mb: MB, node: Vector2, t: Vector2, z: float, style: String) -> void:
+	var wall := Color("9b5a47") if style == "brick" else Color("9d9684")
+	var edge := wall.darkened(0.32)
+	var n := Vector2(-t.y, t.x)
+	var half := 0.4
+	for s: float in [-1.0, 1.0]:
+		var a0 := node - t * half + n * s * 0.19
+		var a1 := node + t * half + n * s * 0.19
+		var b0 := node - t * half + n * s * 0.37
+		var b1 := node + t * half + n * s * 0.37
+		mb.quad(iso(a0, z + 0.4), iso(a1, z + 0.4), iso(b1, z + 0.4), iso(b0, z + 0.4), wall)
+		mb.line(iso(b0, z + 0.5), iso(b1, z + 0.5), 1.4, edge)
+		# Gates standing open against the wall at each end.
+		for e: float in [-1.0, 1.0]:
+			var g0 := node + t * half * e + n * s * 0.2
+			var g1 := node + t * (half * e - e * 0.2) + n * s * 0.215
+			mb.line(iso(g0, z + 1.0), iso(g1, z + 1.0), 3.0, TIMBER)
+	# Cross-ties at each end.
+	for e: float in [-1.0, 1.0]:
+		var c0 := node + t * half * e + n * 0.19
+		var c1 := node + t * half * e - n * 0.19
+		mb.line(iso(c0, z + 0.5), iso(c1, z + 0.5), 1.4, edge)
+
+
+## Balance beams on the lock gates, drawn over passing boats.
+static func lock_beams(mb: MB, node: Vector2, t: Vector2, z: float) -> void:
+	var n := Vector2(-t.y, t.x)
+	for s: float in [-1.0, 1.0]:
+		for e: float in [-1.0, 1.0]:
+			var base := node + t * 0.38 * e + n * s * 0.27
+			var tip := base + t * 0.16 * e + n * s * 0.1
+			var a := iso(base, z + 3.5)
+			var b := iso(tip, z + 3.5)
+			mb.line(a, b, 2.4, Color("26211e"))
+			mb.line(b, b.lerp(a, 0.3), 2.4, Color("f4efe2"))

@@ -30,11 +30,15 @@ at any time; the + / - / Fit buttons on the right zoom and bring the map back.
 | Category | Tools | Cost |
 | --- | --- | --- |
 | Restore | Tap or drag along silted old canal to restore that part of it | 4 a length |
-| Waterways | Canal (drag to dig; climbing a level builds a lock), Moorings, Wide water (a winding hole), Stone lock, Brick lock (tap a lock to rebuild it) | 12 a step, lock +25, moorings 10, wide water 25, rebuild 10 |
+| Waterways | Canal (drag to dig), Moorings, Wide water (a winding hole), Stone lock, Brick lock (tap a plain canal; locks are decoration) | 12 a step, moorings 10, wide water 25, lock 15 |
 | Roads & Paths | Gravel path, Tarmac path, Dirt track, Lane, Road (with a white centre line), Roundabout (tap a junction of 3+ roads), Brick / Stone / Footbridge (tap a bridge to rebuild it) | 1 - 10 a step, roundabout 30, rebuild 10 |
 | Buildings | Cottage, Terrace, Shop, Cafe, Pub, Boatyard, Windmill, Car park, Beer garden | 15 - 70 |
 | Nature | Trees; Hedgerow, Stone wall, Fence (drag along a path or road to line both sides) | 2; 2 - 4 a length |
 | Bulldoze | Knock down what you built (half the cost back), clear trees (6), or knock down one of the map's buildings (40; it stops being a goal) | - |
+
+The land is flat, and rivers are navigable: boats use them as well as canals,
+and a canal dug along a river replaces it, opening smoothly into the wider river
+at each end. Locks are decoration (they add charm and slow boats a little).
 
 Nothing is built over anything else: clear trees, or knock down a path,
 before building there. Anything can be knocked down except where the map's

@@ -27,8 +27,8 @@ const CATEGORIES := [
 		[T.CANAL, "Canal", "12 a step"],
 		[T.MOORINGS, "Moorings", "10"],
 		[T.BASIN, "Wide water", "25"],
-		[T.LOCK_STONE, "Stone lock", "rebuild 10"],
-		[T.LOCK_BRICK, "Brick lock", "rebuild 10"]]],
+		[T.LOCK_STONE, "Stone lock", "15"],
+		[T.LOCK_BRICK, "Brick lock", "15"]]],
 	["Roads & Paths", T.PATH, [
 		[T.PATH, "Gravel path", "2 a step"],
 		[T.PATH_TARMAC, "Tarmac path", "4 a step"],
@@ -64,8 +64,8 @@ const TOOL_HINTS := {
 	T.HEDGE_ROW: "Drag along a path or road to plant a hedge each side",
 	T.WALL_ROW: "Drag along a path or road to build a dry-stone wall each side",
 	T.FENCE_ROW: "Drag along a path or road to put up a fence each side",
-	T.LOCK_STONE: "Tap a lock to rebuild it in stone",
-	T.LOCK_BRICK: "Tap a lock to rebuild it in Victorian brick",
+	T.LOCK_STONE: "Tap a canal to add a stone lock (decoration)",
+	T.LOCK_BRICK: "Tap a canal to add a Victorian brick lock (decoration)",
 	T.BRIDGE_BRICK: "Tap a bridge to rebuild it as a brick humpback",
 	T.BRIDGE_STONE: "Tap a bridge to rebuild it as a stone arch",
 	T.BRIDGE_WOOD: "Tap a bridge to rebuild it as a wooden footbridge",
@@ -388,14 +388,16 @@ func _process(delta: float) -> void:
 	view.refresh(Vector2i(-1, -1))   # catches changes not made through the tools
 	# Keep a little traffic moving between any portals that are joined up.
 	_next_boat -= delta
-	if _next_boat > 0.0 or world.pairs.is_empty() or view.boat_count() >= MAX_BOATS:
+	if _next_boat > 0.0 or world.traffic.is_empty() or view.boat_count() >= MAX_BOATS:
 		return
 	_next_boat = BOAT_GAP
-	var pair: Array = world.pairs.pick_random()
+	var pair: Array = world.traffic.pick_random()
 	if randf() < 0.5:
 		pair = [pair[1], pair[0]]
-	var from: Dictionary = world.portals[pair[0]]
-	var to: Dictionary = world.portals[pair[1]]
+	# Boats come and go at canal portals and at the ends of rivers.
+	var ends := world.water_ends()
+	var from: Dictionary = ends[pair[0]]
+	var to: Dictionary = ends[pair[1]]
 	var path := world.path_between(from.cell, to.cell)
 	if path.size() >= 2:
 		view.spawn_boat(path, from.dir, to.dir)
@@ -677,9 +679,7 @@ func _draw_link(a: Vector2i, b: Vector2i) -> bool:
 	world.add_link(a, b, type, style)
 	_stroke_links += 1
 	view.refresh(b)
-	if plan.lock:
-		_show_toast("Lock built to climb the hill")
-	elif plan.cost >= World.BRIDGE_COST and type != L.CANAL and not plan.restore and world.has_bridge(b if world.has_water(b) else a):
+	if plan.cost >= World.BRIDGE_COST and type != L.CANAL and not plan.restore and world.has_bridge(b if world.has_water(b) else a):
 		_show_toast("Bridge built")
 	return true
 

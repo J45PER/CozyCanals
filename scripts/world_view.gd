@@ -32,8 +32,8 @@ const BOAT_RUN := 6            # cells a boat travels through the countryside
 
 const CANAL_W := 0.2
 const RIVER_W := 0.34            # rivers are wider than canals
-const RIVER_EDGE_W := 0.385
-const RIVER_BANK_W := 0.45
+const RIM_CANAL := 0.07          # the coping around canal water
+const RIM_RIVER := 0.04          # the sandy edge of a river
 const BRICK_OLD := Color("9a6a55")       # Victorian engineering brick
 const BRICK_MOSSY := Color("857a5c")
 const STONE_NEW := Color("e2dccb")       # freshly laid coping
@@ -64,7 +64,7 @@ const BUILDING_SPRITE := {
 	B.COTTAGE: "cottage", B.TERRACE: "terrace", B.SHOP: "shop", B.CAFE: "cafe", B.PUB: "pub",
 	B.BOATYARD: "boatyard", B.WINDMILL: "windmill", B.CHURCH: "church", B.FARM: "farm", B.MANOR: "manor",
 }
-const TREES := ["oak_a", "oak_b", "oak_c", "oak_d", "oak_a", "oak_c", "birch_a", "poplar_a", "pine_a", "pine_b"]
+const TREES := ["oak_a", "oak_b", "oak_a", "oak_c", "pine_a", "pine_b"]
 
 var world: World
 var hover := Vector2i(-1, -1)
@@ -101,7 +101,6 @@ var _standing: Array = []      # per row: hedges, walls, signposts, reeds
 var _sprites: Array = []       # per row: [[Texture2D, Rect2, depth, Color], ...]
 var _place_top := {}           # cell -> height of the building sprite on it
 var _smoke: Array = []         # per row: [Vector2] chimney tops
-var _water: Array = []         # per row: [Vector2i] canal cells
 var _over := {}                # cell -> ArrayMesh drawn above boats (bridges, locks)
 var _over_cells: Array = []    # per row: [Vector2i]
 var _dirty := {}
@@ -154,8 +153,9 @@ func _row(r: int) -> Array[Vector2i]:
 	return out
 
 
-func _h(c: Vector2i) -> int:
-	return world.height(c) if world.in_bounds(c) else _apron_h.get(c, 0)
+## The land is flat. (The map keeps a height per cell, but it is not shown.)
+func _h(_c: Vector2i) -> int:
+	return 0
 
 
 func _zc(c: Vector2i) -> float:
@@ -205,7 +205,7 @@ func set_world(wd: World) -> void:
 	_place_top.clear()
 	hover = Vector2i(-1, -1)
 	var rows := _rows()
-	for arr in [_flat_terrain, _flat_links, _raised, _standing, _sprites, _smoke, _water, _over_cells]:
+	for arr in [_flat_terrain, _flat_links, _raised, _standing, _sprites, _smoke, _over_cells]:
 		arr.clear()
 		arr.resize(rows)
 	_over.clear()
@@ -342,7 +342,6 @@ func _rebuild(budget: int) -> void:
 		var standing := Art.MB.new()
 		var sprites := []
 		var smoke := []
-		var water := []
 		for c in cells:
 			if _hidden(c):
 				continue
@@ -352,15 +351,12 @@ func _rebuild(budget: int) -> void:
 				_emit_terrain(c, raised)
 				_emit_links(c, raised)
 			_emit_standing(c, standing, sprites, smoke)
-			if world.in_bounds(c) and world.has_canal(c):
-				water.append(c)
 		_flat_terrain[r] = terrain.mesh()
 		_flat_links[r] = links.mesh()
 		_raised[r] = raised.mesh()
 		_standing[r] = standing.mesh()
 		_sprites[r] = sprites
 		_smoke[r] = smoke
-		_water[r] = water
 		for c in (_over_cells[r] if _over_cells[r] != null else []):
 			_over.erase(c)
 		var over := []
@@ -545,11 +541,10 @@ func _advance(list: Array, delta: float, boats: bool) -> Array:
 	for tr in list:
 		var speed: float = tr.speed
 		if boats:
-			# Slow through locks, where the water level changes.
-			var a := _track_at(tr, tr.s - 0.3)
-			var b := _track_at(tr, tr.s + 0.3)
-			if absf(a.z - b.z) > 0.5:
-				speed *= 0.35
+			# Slow through locks.
+			var at := _track_at(tr, tr.s)
+			if world.features.get(Vector2i(floori(at.x), floori(at.y)), "").begins_with("lock_"):
+				speed *= 0.45
 		tr.s += speed * delta
 		if tr.s >= tr.cum[tr.cum.size() - 1]:
 			if boats:
@@ -858,26 +853,14 @@ func _emit_terrain(c: Vector2i, mb: Art.MB) -> void:
 			for k: float in [-0.3, 0.0, 0.3]:
 				var top := mid + along * 2.0 * k
 				mb.line(Art.iso(top, z), Art.iso(top + Vector2(d) * 0.16, _zc(n)), 1.4, Color("85784f"))
-	if not _busy(c):
-		Art.field_detail(mb, o, ground_z, _fields[_cell_field[c]], fade)
 	if world.in_bounds(c) and world.building(c) != B.NONE:
 		_emit_plot_ground(c, mb)
-
-	var river := _open_river(c)
-	if not river.is_empty():
-		_stroke(mb, c, river, RIVER_BANK_W, Art.hazed(Art.RIVER_BANK, fade), true, true)
-		_stroke(mb, c, river, RIVER_EDGE_W, Art.hazed(Art.RIVER_EDGE, fade), true, true)
-		_stroke(mb, c, river, RIVER_W, Art.hazed(Art.RIVER, fade), true, true)
-		if fade == 0.0 and Art.rnd(c.x, c.y, 9) > 0.6:
-			Art.stone(mb, _node(c, true) + Vector2(0.08, 0.1), z)
 
 
 # The river's directions through a cell that are still river: where it has
 # been made into canal, the canal replaces it.
 func _open_river(c: Vector2i) -> Array:
 	var river: Array = _river_dirs.get(c, [])
-	if _cont.has(c) and _cont[c][0] == "river":
-		river = _cont[c][1]
 	if world.in_bounds(c) and world.has_canal(c):
 		var rest := []
 		for d: Vector2 in river:
@@ -885,42 +868,6 @@ func _open_river(c: Vector2i) -> Array:
 				rest.append(d)
 		return rest
 	return river
-
-
-# A tapering strip from a cell's node out to where a canal leaves the cell,
-# fading from river colours and width into canal ones.
-func _flare(mb: Art.MB, node: Vector2, join: Vector2, w0: float, w1: float, c0: Color, c1: Color, z: float) -> void:
-	var dir := (join - node)
-	if dir.length() < 0.001:
-		return
-	var n := Vector2(-dir.y, dir.x).normalized()
-	var prev_l := Art.iso(node + n * w0, z)
-	var prev_r := Art.iso(node - n * w0, z)
-	var prev_c := c0
-	for i in range(1, 7):
-		var t := i / 6.0
-		var p := node.lerp(join, t)
-		var w := lerpf(w0, w1, t)
-		var col := c0.lerp(c1, smoothstep(0.0, 1.0, t))
-		var l := Art.iso(p + n * w, z)
-		var r := Art.iso(p - n * w, z)
-		mb.quad_shaded(prev_l, l, r, prev_r, prev_c, col, col, prev_c)
-		prev_l = l
-		prev_r = r
-		prev_c = col
-
-
-# A canal cell that river also runs through is a junction: the canal opens
-# out into the wider river water, blending its colours and edging.
-func _emit_river_blend(c: Vector2i, canal: Array, aged: Array, mb: Art.MB, z: float) -> void:
-	var node := _node(c)
-	for i in canal.size():
-		var d: Vector2 = canal[i]
-		var join := _join(c, Vector2i(d))
-		var rim: Color = BRICK_OLD if aged[i] else STONE_NEW
-		_flare(mb, node, join, RIVER_BANK_W, CANAL_W + 0.09, Art.RIVER_BANK, rim, z)
-		_flare(mb, node, join, RIVER_EDGE_W, CANAL_W + 0.03, Art.RIVER_EDGE, Art.WATER_EDGE, z)
-		_flare(mb, node, join, RIVER_W, CANAL_W, Art.RIVER, Art.WATER, z)
 
 
 # A cell with a line or building on it, where field details and hedges stop.
@@ -1031,89 +978,23 @@ func _emit_links(c: Vector2i, mb: Art.MB) -> void:
 	if not world.in_bounds(c):
 		_emit_continuation(c, mb)
 		return
-	if not world.adj.has(c) and not world.exits.has(c):
-		return
 	var z := _zc(c)
 	var node := _node(c)
-
 	_emit_land_lines(c, mb)
 
-	var canal := _dirs(c, [L.CANAL])
-
-	# Silted old canal: the brick edging still shows through mud and weeds.
-	# Where it meets working canal, the working canal is drawn over it.
+	# Silted old canal: brick edging showing through mud.
 	var old := _dirs(c, [L.DERELICT])
-	if not old.is_empty() and canal.is_empty():
-		_stroke(mb, c, old, CANAL_W + 0.09, BRICK_MOSSY, false)
-		_stroke(mb, c, old, CANAL_W + 0.035, Art.MUD, false)
-		_stroke(mb, c, old, 0.12, Art.MURK, false)
-		if Art.rnd(c.x, c.y, 17) > 0.5:
-			Art.weeds(mb, node + Vector2(0.06, -0.04), z)
+	if not old.is_empty() and not world.has_canal(c):
+		_stroke(mb, c, old, CANAL_W + RIM_CANAL, BRICK_MOSSY, false)
+		_stroke(mb, c, old, CANAL_W, Art.MURK, false)
 
-	if canal.is_empty():
-		return
-	# Old canal (the map's own, or restored) keeps its Victorian brick edge and
-	# cinder towpath; newly dug cut has pale stone and fresh gravel.
-	var aged := []
-	for d: Vector2 in canal:
-		aged.append(world.is_old(c, c + Vector2i(d)))
-	var portal := _portal_dir(c)
-	if portal != Vector2i.ZERO:
-		canal.append(Vector2(portal))
-		aged.append(true)
-
-	# Towpath on one bank, on the same side all the way along.
-	var from := Vector2(_tp_in.get(c, Vector2i.ZERO))
-	var from_aged := true
-	var outs := []
-	var outs_aged := []
-	for i in canal.size():
-		if canal[i] == from:
-			from_aged = aged[i]
-		else:
-			outs.append(canal[i])
-			outs_aged.append(aged[i])
-	for layer in [[0.27, 0.45, Art.PATH_EDGE, CINDER_EDGE], [0.27, 0.42, Art.PATH, CINDER]]:
-		if from == Vector2.ZERO:
-			for i in outs.size():
-				var j := _join(c, Vector2i(outs[i]))
-				_band(mb, node, (node + j) * 0.5, j, layer[0], layer[1], z, z, z, layer[3] if outs_aged[i] else layer[2])
-		elif outs.is_empty():
-			var j := _join(c, Vector2i(from))
-			_band(mb, j, (node + j) * 0.5, node, layer[0], layer[1], z, z, z, layer[3] if from_aged else layer[2])
-		else:
-			for i in outs.size():
-				_band(mb, _join(c, Vector2i(from)), node, _join(c, Vector2i(outs[i])), layer[0], layer[1], z, z, z,
-					layer[3] if (from_aged and outs_aged[i]) else layer[2])
-
-	var meets_river := not _open_river(c).is_empty()
-	if not (meets_river and canal.size() == 1):
-		_stroke(mb, c, canal, CANAL_W + 0.09, STONE_NEW, false, false, aged, BRICK_OLD)
-		_stroke(mb, c, canal, CANAL_W + 0.05, STONE_NEW.darkened(0.08), false, false, aged, Art.COPING)
-		_stroke(mb, c, canal, CANAL_W + 0.03, Art.WATER_EDGE, false)
-		_stroke(mb, c, canal, CANAL_W, Art.WATER, false)
-	if meets_river:
-		# A canal that ends in a river has no cap of its own: its mouth opens
-		# straight out into the river.
-		_emit_river_blend(c, canal, aged, mb, z)
-	if Art.rnd(c.x, c.y, 44) > 0.75 and canal.size() == 2 and not world.is_bridge(c) and not world.features.has(c):
-		Art.lilies(mb, node, z, c.x + c.y * 3)
+	_emit_towpath(c, mb, z, node)
+	_emit_water(c, mb, z)
 	if world.features.get(c, "") == "basin":
-		# Wide water: a round winding hole where boats can turn.
-		var tang := _canal_tangent(c)
-		var across := Vector2(-tang.y, tang.x)
-		for layer in [[0.44, aged.has(true) and aged.count(true) == aged.size(), true], [0.4, false, false], [0.37, false, false]]:
-			var pts := PackedVector2Array()
-			for k in 28:
-				var a := TAU * k / 28.0
-				var q: Vector2 = node + tang * cos(a) * (layer[0] + 0.1) + across * sin(a) * layer[0]
-				pts.append(Art.iso(q, z))
-			var col := Art.WATER
-			if layer[2]:
-				col = BRICK_OLD if layer[1] else STONE_NEW
-			elif layer[0] == 0.4:
-				col = Art.WATER_EDGE
-			mb.fan(pts, col)
+		_emit_basin(c, mb, z, node)
+	var f: String = world.features.get(c, "")
+	if f.begins_with("lock_"):
+		Art.lock_rim(mb, node, _canal_tangent(c), z, f.trim_prefix("lock_"))
 	if world.is_bridge(c):
 		# Shade on the water under the deck.
 		var land := world.link_dirs(c, [L.PATH, L.ROAD])
@@ -1124,13 +1005,166 @@ func _emit_links(c: Vector2i, mb: Art.MB) -> void:
 			_band(mb, p0.lerp(p1, 0.3), node, p1.lerp(p0, 0.3), -w, w, z, z, z, Color(0.1, 0.18, 0.2, 0.45))
 
 
-# Canals and roads carrying on into the distance, hazed like the land.
+# Towpath on one bank of a canal, the same side all the way along: dark
+# cinder beside old canal, pale gravel beside new.
+func _emit_towpath(c: Vector2i, mb: Art.MB, z: float, node: Vector2) -> void:
+	var canal := _dirs(c, [L.CANAL])
+	if canal.is_empty():
+		return
+	var aged := []
+	for d: Vector2 in canal:
+		aged.append(world.is_old(c, c + Vector2i(d)))
+	var portal := _portal_dir(c)
+	if portal != Vector2i.ZERO:
+		canal.append(Vector2(portal))
+		aged.append(true)
+	var from := Vector2(_tp_in.get(c, Vector2i.ZERO))
+	var from_aged := true
+	var outs := []
+	var outs_aged := []
+	for i in canal.size():
+		if canal[i] == from:
+			from_aged = aged[i]
+		else:
+			outs.append(canal[i])
+			outs_aged.append(aged[i])
+	if from == Vector2.ZERO:
+		for i in outs.size():
+			var j := _join(c, Vector2i(outs[i]))
+			_band(mb, node, (node + j) * 0.5, j, 0.27, 0.42, z, z, z, CINDER if outs_aged[i] else Art.PATH)
+	elif outs.is_empty():
+		var j := _join(c, Vector2i(from))
+		_band(mb, j, (node + j) * 0.5, node, 0.27, 0.42, z, z, z, CINDER if from_aged else Art.PATH)
+	else:
+		for i in outs.size():
+			_band(mb, _join(c, Vector2i(from)), node, _join(c, Vector2i(outs[i])), 0.27, 0.42, z, z, z,
+				CINDER if (from_aged and outs_aged[i]) else Art.PATH)
+
+
+# --- Water ----------------------------------------------------------------------
+# Canals and rivers are drawn by one function. Every waterway has a width and
+# a water colour; through a cell the width and colour change smoothly from
+# one edge's to the next, so where a narrow canal meets a wide river there is
+# a gradual taper and a blend of colours, never a join.
+
+# Every waterway through a cell: [[direction, kind, old], ...], kind "canal" or "river".
+func _water_edges(c: Vector2i) -> Array:
+	var out := []
+	if not world.in_bounds(c):
+		if _cont.has(c) and (_cont[c][0] == "canal" or _cont[c][0] == "river"):
+			for d: Vector2 in _cont[c][1]:
+				out.append([d, _cont[c][0], true])
+		return out
+	for e in world.adj.get(c, []):
+		if e[1] == L.CANAL:
+			out.append([Vector2(e[0] - c), "canal", world.is_old(c, e[0])])
+	var portal := _portal_dir(c)
+	if portal != Vector2i.ZERO:
+		out.append([Vector2(portal), "canal", true])
+	for d: Vector2 in _open_river(c):
+		out.append([d, "river", false])
+	return out
+
+
+# One end of a waterway piece: half-width of water, extra width of rim, and colours.
+func _water_end(edge: Array) -> Dictionary:
+	if edge[1] == "river":
+		return {"w": RIVER_W, "x": RIM_RIVER, "cw": Art.RIVER, "cr": Art.RIVER_BANK}
+	return {"w": CANAL_W, "x": RIM_CANAL, "cw": Art.WATER, "cr": BRICK_OLD if edge[2] else STONE_NEW}
+
+
+func _mean_end(ends: Array) -> Dictionary:
+	var w := 0.0
+	var x := 0.0
+	var cw := Color(0, 0, 0, 0)
+	var cr := Color(0, 0, 0, 0)
+	for e in ends:
+		w += e.w
+		x += e.x
+		cw += e.cw
+		cr += e.cr
+	var n := float(ends.size())
+	return {"w": w / n, "x": x / n, "cw": cw / n, "cr": cr / n}
+
+
+func _emit_water(c: Vector2i, mb: Art.MB, z: float) -> void:
+	var edges := _water_edges(c)
+	if edges.is_empty():
+		return
+	var node := _node(c)
+	var ends := []
+	for e in edges:
+		ends.append(_water_end(e))
+	# Pieces: [p0, pc, p1, end at p0, end at p1], and a disc for ends and junctions.
+	var pieces := []
+	var disc := {}
+	if edges.size() == 2:
+		pieces.append([_join(c, Vector2i(edges[0][0])), node, _join(c, Vector2i(edges[1][0])), ends[0], ends[1]])
+	else:
+		var hub: Dictionary = ends[0] if edges.size() == 1 else _mean_end(ends)
+		for i in edges.size():
+			var j := _join(c, Vector2i(edges[i][0]))
+			pieces.append([node, (node + j) * 0.5, j, hub, ends[i]])
+		disc = hub
+	for layer in ["rim", "water"]:
+		for piece in pieces:
+			_wband(mb, piece[0], piece[1], piece[2], piece[3], piece[4], layer, z)
+		if not disc.is_empty():
+			var r: float = (disc.w + (disc.x if layer == "rim" else 0.0)) * 1.414
+			mb.disc(Art.iso(node, z), r * HW, r * HH, disc.cr if layer == "rim" else disc.cw, 20)
+
+
+# A band along p0 -> pc -> p1 whose width and colour change from one end to the other.
+func _wband(mb: Art.MB, p0: Vector2, pc: Vector2, p1: Vector2, ea: Dictionary, eb: Dictionary, layer: String, z: float) -> void:
+	# Overlap the neighbouring cell's part by a hair so no crack shows at the join.
+	if p0.distance_to(pc) > 0.001 and p1.distance_to(pc) > 0.001:
+		p0 += (p0 - pc).normalized() * 0.02
+		p1 += (p1 - pc).normalized() * 0.02
+	var steps := 8
+	var prev_l := Vector2.ZERO
+	var prev_r := Vector2.ZERO
+	var prev_c := Color.WHITE
+	for i in steps + 1:
+		var t := float(i) / steps
+		var pos := p0.lerp(pc, t).lerp(pc.lerp(p1, t), t)
+		var tan := (pc - p0).lerp(p1 - pc, t)
+		if tan.length() < 0.0001:
+			tan = p1 - p0
+		var n := Vector2(tan.y, -tan.x).normalized()
+		var rim := layer == "rim"
+		var w := lerpf(ea.w + (ea.x if rim else 0.0), eb.w + (eb.x if rim else 0.0), t)
+		var col: Color = (ea.cr if rim else ea.cw).lerp(eb.cr if rim else eb.cw, t)
+		var l := Art.iso(pos + n * w, z)
+		var r := Art.iso(pos - n * w, z)
+		if i > 0:
+			mb.quad_shaded(prev_l, l, r, prev_r, prev_c, col, col, prev_c)
+		prev_l = l
+		prev_r = r
+		prev_c = col
+
+
+# Wide water: a round winding hole where boats can turn.
+func _emit_basin(c: Vector2i, mb: Art.MB, z: float, node: Vector2) -> void:
+	var tang := _canal_tangent(c)
+	var across := Vector2(-tang.y, tang.x)
+	var aged := true
+	for e in _water_edges(c):
+		aged = aged and e[2]
+	for layer in [[0.44, BRICK_OLD if aged else STONE_NEW], [0.37, Art.WATER]]:
+		var pts := PackedVector2Array()
+		for k in 28:
+			var a := TAU * k / 28.0
+			var q: Vector2 = node + tang * cos(a) * (layer[0] + 0.1) + across * sin(a) * layer[0]
+			pts.append(Art.iso(q, z))
+		mb.fan(pts, layer[1])
+
+
+# Roads, paths and waterways carrying on into the distance.
 func _emit_continuation(c: Vector2i, mb: Art.MB) -> void:
 	if not _cont.has(c):
 		return
 	var kind: String = _cont[c][0]
 	var dirs: Array = _cont[c][1]
-	var fade := _fade(c)
 	var z := _zc(c)
 	var node := _node(c)
 	match kind:
@@ -1143,15 +1177,12 @@ func _emit_continuation(c: Vector2i, mb: Art.MB) -> void:
 			if st.get("marks", false):
 				_dashes(mb, j0, node, j1)
 		"canal":
-			# Towpath on the same bank as the map's side of the canal.
 			var j0 := _join(c, Vector2i(dirs[1]))
 			var j1 := _join(c, Vector2i(dirs[0]))
-			_band(mb, j0, node, j1, 0.27, 0.45, z, z, z, Art.hazed(CINDER_EDGE, fade))
-			_band(mb, j0, node, j1, 0.27, 0.42, z, z, z, Art.hazed(CINDER, fade))
-			_stroke(mb, c, dirs, CANAL_W + 0.09, Art.hazed(BRICK_OLD, fade), false)
-			_stroke(mb, c, dirs, CANAL_W + 0.05, Art.hazed(Art.COPING, fade), false)
-			_stroke(mb, c, dirs, CANAL_W + 0.03, Art.hazed(Art.WATER_EDGE, fade), false)
-			_stroke(mb, c, dirs, CANAL_W, Art.hazed(Art.WATER, fade), false)
+			_band(mb, j0, node, j1, 0.27, 0.42, z, z, z, CINDER)
+			_emit_water(c, mb, z)
+		"river":
+			_emit_water(c, mb, z)
 
 
 # Paths and roads through a cell: [[direction, style], ...], widest first.
@@ -1591,8 +1622,6 @@ func _emit_standing(c: Vector2i, mb: Art.MB, sprites: Array, smoke: Array) -> vo
 		_emit_verges(c, mb)
 		if world.features.get(c, "") == "moorings":
 			_emit_moorings(c, mb, sprites)
-	if _river_dirs.has(c) and Art.rnd(c.x, c.y, 8) > 0.4:
-		Art.reeds(mb, _node(c, true) + Vector2(-0.2, -0.18), z)
 
 	if not world.in_bounds(c):
 		_emit_scenery(c, mine, fade)
@@ -1617,13 +1646,10 @@ func _emit_standing(c: Vector2i, mb: Art.MB, sprites: Array, smoke: Array) -> vo
 				Art.signpost(mb, _label_anchor(p), z)
 		match world.terrain_at(c):
 			T.WOOD:
-				var by_water := false
-				for d in World.DIRS4:
-					by_water = by_water or world.has_water(c + d) or _river_dirs.has(c + d)
 				for j in 2 + int(Art.rnd(seed, 0, 60) > 0.4):
 					var p := o + Vector2(0.2 + 0.6 * Art.rnd(seed, j, 61), 0.2 + 0.6 * Art.rnd(seed, j, 71))
 					var pick := int(Art.rnd(seed, j, 81) * TREES.size())
-					_put(mine, "willow_a" if (by_water and j == 0) else TREES[pick], p, z)
+					_put(mine, TREES[pick], p, z)
 			T.ROCK:
 				_put(mine, Sprites.pick("rock", seed), centre, z)
 			T.GRASS:
@@ -1688,11 +1714,9 @@ func _emit_over(c: Vector2i, mb: Art.MB) -> void:
 		var is_road := not world.link_dirs(c, [L.ROAD]).is_empty()
 		var plain := "wood" if (over_river and not world.has_water(c)) else "brick"
 		Art.bridge(mb, p0, p1, z, is_road, world.styles.get(c, plain))
-	for pair in world.locks():
-		if pair[1] == c:
-			# The chamber is cut into the upper level, so it is drawn with this cell.
-			var uphill := (_node(c) - _node(pair[0])).normalized()
-			Art.lock(mb, _join(c, pair[0] - c), uphill, _zc(pair[0]), z, world.styles.get(c, "stone"))
+	var f: String = world.features.get(c, "")
+	if f.begins_with("lock_"):
+		Art.lock_beams(mb, _node(c), _canal_tangent(c), z)
 
 
 # --- Drawing ----------------------------------------------------------------
@@ -1726,8 +1750,6 @@ func _draw() -> void:
 	for r in rows:
 		if _flat_links[r] != null:
 			draw_mesh(_flat_links[r], null)
-		for c: Vector2i in (_water[r] if _water[r] != null else []):
-			_glint(c)
 	for seg in _edge_lines:
 		var pts := PackedVector2Array()
 		for k in 5:
@@ -1754,14 +1776,6 @@ func _draw() -> void:
 				var f := fmod(_t * 0.3 + j / 3.0 + p.x * 0.01, 1.0)
 				draw_circle(p + Vector2(sin(f * 5.0 + j) * 3.0 + f * 5.0, -f * 22.0), 2.2 + f * 3.5,
 					Color(1, 1, 1, 0.5 * (1.0 - f)))
-
-
-func _glint(c: Vector2i) -> void:
-	var hsh := Art.rnd(c.x, c.y, 7)
-	var ph := _t * 0.6 + hsh * TAU
-	var a := 0.16 + 0.16 * sin(ph * 1.7)
-	var p := Art.iso(_node(c) + Vector2(0.07 * sin(ph), 0.07 * cos(ph * 0.8)), _zc(c))
-	draw_line(p + Vector2(-5, 0), p + Vector2(5, 0), Color(1, 1, 1, a), 1.2)
 
 
 func _draw_boat(st: Dictionary) -> void:

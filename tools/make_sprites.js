@@ -175,7 +175,7 @@ function windowAt(s, f, a, z, o = {}) {
   panel(s, f, a, a + w, z, z + h, s.grad(light(glass, 0.3), dark(glass, 0.12)), { sw: 0.25, stroke: dark(glass, 0.5) });
   s.line(f(a + w / 2, z), f(a + w / 2, z + h), C.frame, 0.35);
   if (h > 4) s.line(f(a, z + h * 0.55), f(a + w, z + h * 0.55), C.frame, 0.35);
-  if (o.box) {
+  if (false && o.box) {
     panel(s, f, a - 0.01, a + w + 0.01, z - 1.6, z - 0.6, C.wood, { sw: 0.2 });
     for (let i = 0; i < 4; i++) s.oval(f(a + w * (i + 0.5) / 4, z - 0.3), 0.9, 0.8, ["#e2604e", "#f1c84b", "#e98bb0", "#f6f0e0"][i], { stroke: null });
   }
@@ -282,6 +282,7 @@ function plot(s, rx = 27, ry = 13.5, col = "#9fbb72") {
 }
 
 function flowers(s, x0, x1, y, n = 6) {
+  return;   // simple style: no flower beds
   s.poly([P(x0, y), P(x1, y), P(x1, y + 0.07), P(x0, y + 0.07)], "#6f9450", { sw: 0.2 });
   const cols = ["#e98bb0", "#f1c84b", "#f6f0e0", "#c58ad6", "#e2604e"];
   for (let i = 0; i < n; i++) s.oval(P(x0 + (x1 - x0) * (i + 0.5) / n, y + 0.035, 1.6), 1.2, 1.1, cols[Math.floor(s.rand() * cols.length)], { stroke: null });
@@ -294,6 +295,7 @@ function bush(s, x, y, r = 3.4, col = C.leafM) {
 }
 
 function table(s, x, y, parasol) {
+  return;   // simple style: no garden furniture
   s.line(P(x, y), P(x, y, 3.8), C.timber, 0.5);
   s.oval(P(x, y, 3.8), 3.6, 1.8, C.frame, { sw: 0.3 });
   for (const d of [-0.07, 0.07]) s.oval(P(x + d, y - d * 0.4, 1.6), 1.2, 0.8, C.wood, { sw: 0.25 });
@@ -350,7 +352,7 @@ function cottage(name, o) {
       s.line(P(0.43, 0.81), P(0.43, 0.81, 8), C.frame, 0.6); s.line(P(0.59, 0.81), P(0.59, 0.81, 8), C.frame, 0.6);
     }
     flowers(s, 0.24, 0.43, 0.715); flowers(s, 0.585, 0.76, 0.715);
-    if (o.rose) for (let i = 0; i < 7; i++) s.oval(L(0.6 + s.rand() * 0.03, 1 + i * 1.6), 1.1, 1.0, i % 2 ? "#d8607a" : "#6f9450", { stroke: null });
+    if (false && o.rose) for (let i = 0; i < 7; i++) s.oval(L(0.6 + s.rand() * 0.03, 1 + i * 1.6), 1.1, 1.0, i % 2 ? "#d8607a" : "#6f9450", { stroke: null });
     bush(s, 0.84, 0.86, 3.2);
     return s;
   };
@@ -453,7 +455,7 @@ B.cafe_b = () => {
   roof(s, d);
   awning(s, R, 0.28, 0.54, 9.4, "#e98bb0", C.frame, 0.1);
   const flags = ["#e2604e", "#f1c84b", "#5f9fb0", "#7fae5a"];
-  for (let i = 0; i < 8; i++) { const p = L(0.31 + i * 0.045, 9.6 - Math.sin(i / 7 * Math.PI) * 1.2); s.poly([[p[0] - 1, p[1]], [p[0] + 1, p[1]], [p[0], p[1] + 2.2]], flags[i % 4], { sw: 0.15 }); }
+  if (false) for (let i = 0; i < 8; i++) { const p = L(0.31 + i * 0.045, 9.6 - Math.sin(i / 7 * Math.PI) * 1.2); s.poly([[p[0] - 1, p[1]], [p[0] + 1, p[1]], [p[0], p[1] + 2.2]], flags[i % 4], { sw: 0.15 }); }
   table(s, 0.3, 0.86, "#5f9fb0"); table(s, 0.6, 0.9, "#e2604e"); table(s, 0.88, 0.62, null);
   bush(s, 0.14, 0.6, 3);
   return s;
@@ -478,7 +480,7 @@ function pub(name, o) {
     if (d.wh > 14) { for (const a of [0.2, 0.44, 0.66]) windowAt(s, L, a, 11, { w: 0.1, h: 4.4 }); windowAt(s, R, d.y0 + 0.27, 11, { h: 4.4 }); }
     windowAt(s, R, d.y0 + 0.09, 3); windowAt(s, R, d.y0 + 0.27, 3);
     // Hanging baskets either side of the door.
-    for (const a of [0.41, 0.585]) { s.oval(L(a, 8.2), 1.8, 1.3, "#6f9450", { sw: 0.2 }); s.oval(L(a, 9), 1.1, 0.9, "#e2604e", { stroke: null }); s.oval(L(a + 0.012, 8.6), 0.9, 0.8, "#f1c84b", { stroke: null }); }
+    if (false) for (const a of [0.41, 0.585]) { s.oval(L(a, 8.2), 1.8, 1.3, "#6f9450", { sw: 0.2 }); s.oval(L(a, 9), 1.1, 0.9, "#e2604e", { stroke: null }); s.oval(L(a + 0.012, 8.6), 0.9, 0.8, "#f1c84b", { stroke: null }); }
     roof(s, d);
     chimney(s, 0.28, 0.42, d.wh + 6, d.wh + d.rh + 4.5);
     chimney(s, 0.7, 0.42, d.wh + 6, d.wh + d.rh + 3.5, C.brick, false);
@@ -861,7 +863,7 @@ function boat(livery, index) {
   // Roof: pole, plank, flower tubs, water can and the stove chimney.
   s.line(at(-0.1, 0.018, 7.4), at(0.25, 0.018, 7.4), "#6b5138", 0.45);
   s.line(at(-0.04, -0.02, 7.4), at(0.2, -0.02, 7.4), "#b08a5c", 0.7);
-  for (const [l, c] of [[0.2, "#d9534a"], [0.08, "#f1c84b"], [-0.02, "#e98bb0"]]) { s.oval(at(l, 0.0, 7.6), 1.5, 1.0, "#6f9450", { stroke: null }); s.oval(at(l, 0.0, 8.2), 1.0, 0.8, c, { stroke: null }); }
+  for (const [l, c] of []) { s.oval(at(l, 0.0, 7.6), 1.5, 1.0, "#6f9450", { stroke: null }); s.oval(at(l, 0.0, 8.2), 1.0, 0.8, c, { stroke: null }); }
   const st = at(-0.27, 0, 7);
   s.line(st, [st[0], st[1] - 3.8], "#1c1f1e", 1.2);
   s.line([st[0], st[1] - 2.9], [st[0], st[1] - 3.8], "#d9a441", 1.2);

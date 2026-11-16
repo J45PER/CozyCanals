@@ -185,13 +185,15 @@ func _run() -> void:
 	main.start_free(3)
 	await create_timer(0.3).timeout
 	_expect("free build is unlimited with roads", main.world.unlimited and _tool(T.ROAD).visible)
-	# Rebuild a lock in brick in free build, if the solver made one.
+	# Locks are decoration: placed on a plain canal, free of any height rules.
 	AutoBuild.run(main.world)
 	var lock_cell := Vector2i(-1, -1)
-	for pair in main.world.locks():
-		lock_cell = pair[1]
-	if lock_cell.x >= 0:
-		_expect("lock restyled", main.world.restyle(T.LOCK_BRICK, lock_cell) == "" and main.world.styles[lock_cell] == "brick")
+	for c in main.world.network:
+		if lock_cell.x < 0 and main.world.add_feature(c, "lock_brick") == "":
+			lock_cell = c
+	_expect("lock placed on a canal", lock_cell.x >= 0 and main.world.features[lock_cell] == "lock_brick")
+	# Boats can use a river: the water ends joined include the river's.
+	_expect("river counts as navigable water", not main.world.river_ends.is_empty() and main.world.water_ends().size() > main.world.portals.size())
 	main.show_menu()
 	await create_timer(0.3).timeout
 	_expect("back to menu", main._menu.visible and main._level_stars[0].filled >= 2)

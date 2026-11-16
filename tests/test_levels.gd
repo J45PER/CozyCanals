@@ -40,7 +40,7 @@ func _check(label: String, params: Dictionary) -> bool:
 	var n := world.portals.size()
 	ok = ok and world.pairs.size() == n * (n - 1) / 2
 	var left := world.coins
-	var locks := world.locks().size()
+	var locks := world.traffic.size()
 	# Bulldozing everything the player built gives some coins back and
 	# leaves the map as it started; the map's own places can't be knocked down.
 	for y in world.h:
@@ -66,7 +66,7 @@ func _check(label: String, params: Dictionary) -> bool:
 		ok = ok and world.check_link(wood, n2, L.PATH).err.begins_with("Trees")
 		var before := world.coins
 		ok = ok and world.bulldoze(wood) == "" and world.coins == before - World.CLEAR_TREES_COST
-	print("%-16s %s  %dx%d portals=%d places=%d locks=%d budget=%d left=%d  (%d ms)" % [
+	print("%-16s %s  %dx%d portals=%d places=%d boat routes=%d budget=%d left=%d  (%d ms)" % [
 		label, "ok" if ok else "FAIL", world.w, world.h, n, world.places.size(),
 		locks, budget, left, ms])
 	return ok

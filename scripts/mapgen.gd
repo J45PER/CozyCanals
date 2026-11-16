@@ -88,7 +88,7 @@ static func _make(p: Dictionary) -> World:
 
 	# Hills as terraces, never stepping more than one level at a time.
 	# The ground climbs across the map, so a canal has to gain height somewhere.
-	var hills: int = p.get("hills", 0)
+	var hills := 0   # the land is flat; locks are decoration
 	var slope := Vector2.from_angle(rng.randf() * TAU)
 	for y in h:
 		for x in w:

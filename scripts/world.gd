@@ -24,7 +24,6 @@ const DIRS4: Array[Vector2i] = [Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0),
 
 const LINK_COST := {L.CANAL: 12, L.PATH: 2, L.ROAD: 6}
 const DREDGE_COST := 4      # restoring derelict canal, or canalising a river
-const LOCK_COST := 25
 const BRIDGE_COST := 20
 const TREE_COST := 2
 const BUILD_COST := {Tool.COTTAGE: 25, Tool.TERRACE: 40, Tool.SHOP: 45, Tool.CAFE: 35, Tool.PUB: 50,
@@ -53,16 +52,17 @@ const DEMOLISH_REFUND := 0.5
 const CHARM := {B.COTTAGE: 4, B.TERRACE: 6, B.SHOP: 7, B.CAFE: 6, B.PUB: 8, B.BOATYARD: 9, B.WINDMILL: 10,
 	B.GARDEN: 3}
 ## Canal features: moorings with bollards, and wide water (a winding hole).
-const CANAL_FEATURES := {Tool.MOORINGS: "moorings", Tool.BASIN: "basin"}
-const FEATURE_COST := {"moorings": 10, "basin": 25}
-const FEATURE_CHARM := {"moorings": 2, "basin": 3}
+const CANAL_FEATURES := {Tool.MOORINGS: "moorings", Tool.BASIN: "basin",
+	Tool.LOCK_STONE: "lock_stone", Tool.LOCK_BRICK: "lock_brick"}
+## Locks are decoration only: the land is flat, so boats never need them.
+const FEATURE_COST := {"moorings": 10, "basin": 25, "lock_stone": 15, "lock_brick": 15}
+const FEATURE_CHARM := {"moorings": 2, "basin": 3, "lock_stone": 2, "lock_brick": 2}
+const FEATURE_NAME := {"moorings": "moorings", "basin": "wide water", "lock_stone": "a lock", "lock_brick": "a lock"}
 ## Knocking down a building that came with the map costs this.
 const PLACE_DEMOLISH_COST := 40
-const LOCK_CHARM := 2
 const STYLE_COST := 10
-## Tools that rebuild an existing lock or bridge in another style.
+## Tools that rebuild an existing bridge in another style.
 const STYLE_TOOLS := {
-	Tool.LOCK_BRICK: ["lock", "brick"], Tool.LOCK_STONE: ["lock", "stone"],
 	Tool.BRIDGE_BRICK: ["bridge", "brick"], Tool.BRIDGE_STONE: ["bridge", "stone"], Tool.BRIDGE_WOOD: ["bridge", "wood"],
 }
 const BRIDGE_CHARM := 3
@@ -90,7 +90,10 @@ var link_style := {}  # edge key -> path or road surface ("gravel", "lane", ...)
 var verges := {}      # edge key -> "hedge", "wall" or "fence" lining a path or road
 var roundabouts := {} # cell -> true
 var exits := {}       # edge cell -> [direction, L, style] for a path or road leaving the map
-var features := {}    # canal cell -> "moorings" or "basin"
+var features := {}    # canal cell -> "moorings", "basin", "lock_stone" or "lock_brick"
+var river_next := {}  # river cell -> neighbouring cells along the river (boats can use them)
+var river_ends: Array = []   # [{cell, dir}] where rivers run off the map
+var traffic: Array = []      # [[from, to], ...] water ends (canal portals, then river ends) joined by navigable water
 
 var portals: Array = []     # [{cell, dir, name}] canals running off the map
 var places: Array = []      # [{cell, kind, need, name, ok}] to be connected
@@ -275,32 +278,22 @@ func restore_at(c: Vector2i) -> Dictionary:
 	return {"count": todo.size(), "cost": total, "err": ""}
 
 
-## The upper cell of a lock that uses cell `c`, or (-1, -1).
-func lock_at(c: Vector2i) -> Vector2i:
-	for pair in locks():
-		if pair[0] == c or pair[1] == c:
-			return pair[1]
-	return Vector2i(-1, -1)
-
-
 ## True if a path or road crosses water (canal or river) at `c`.
 func has_bridge(c: Vector2i) -> bool:
 	return is_bridge(c) or (terrain_at(c) == T.RIVER and land_links(c) > 0)
 
 
-## Rebuilds the lock or bridge at `c` in the tool's style. Returns "" or why not.
+## Rebuilds the bridge at `c` in the tool's style. Returns "" or why not.
 func restyle(tool: int, c: Vector2i) -> String:
-	var what: String = STYLE_TOOLS[tool][0]
 	var style: String = STYLE_TOOLS[tool][1]
-	var at := lock_at(c) if what == "lock" else (c if has_bridge(c) else Vector2i(-1, -1))
-	if at.x < 0:
-		return "Tap a lock to rebuild it" if what == "lock" else "Tap a bridge to rebuild it"
-	if styles.get(at, "") == style:
+	if not has_bridge(c):
+		return "Tap a bridge to rebuild it"
+	if styles.get(c, "") == style:
 		return "It's already built like that"
 	if not unlimited and STYLE_COST > coins:
 		return "Not enough coins (%d needed)" % STYLE_COST
-	styles[at] = style
-	style_paid[at] = style_paid.get(at, 0) + STYLE_COST
+	styles[c] = style
+	style_paid[c] = style_paid.get(c, 0) + STYLE_COST
 	_spend(STYLE_COST)
 	recompute()
 	return ""
@@ -329,7 +322,7 @@ func is_bridge(c: Vector2i) -> bool:
 ## What adding a link would involve: {err, cost, lock, restore}.
 ## err is "" if allowed, "same" if the link already exists.
 func check_link(a: Vector2i, b: Vector2i, type: int, style := "") -> Dictionary:
-	var r := {"err": "", "cost": 0, "lock": false, "restore": false}
+	var r := {"err": "", "cost": 0, "restore": false}
 	if not in_bounds(a) or not in_bounds(b):
 		r.err = "That's off the map"
 		return r
@@ -356,10 +349,6 @@ func check_link(a: Vector2i, b: Vector2i, type: int, style := "") -> Dictionary:
 		if diagonal and link(Vector2i(a.x + d.x, a.y), Vector2i(a.x, a.y + d.y)) != -1:
 			r.err = "Can't cross mid-way - meet at a point instead"
 			return r
-		var dh := absi(height(a) - height(b))
-		if dh > 1:
-			r.err = "Too steep here"
-			return r
 		for c: Vector2i in [a, b]:
 			if terrain_at(c) == T.ROCK:
 				r.err = "Solid rock - go around"
@@ -373,9 +362,6 @@ func check_link(a: Vector2i, b: Vector2i, type: int, style := "") -> Dictionary:
 		var both_river := terrain_at(a) == T.RIVER and terrain_at(b) == T.RIVER
 		var base: int = DREDGE_COST + 1 if (type == L.CANAL and both_river) else STYLE_LINK_COST.get(style, LINK_COST[type])
 		r.cost = _scaled(base, diagonal)
-		if type == L.CANAL and dh == 1:
-			r.lock = true
-			r.cost += LOCK_COST
 		for c: Vector2i in [a, b]:
 			if type == L.CANAL:
 				if not has_water(c) and land_links(c) >= 2:
@@ -595,6 +581,8 @@ func bulldoze(c: Vector2i) -> String:
 		exits.erase(c)
 	if features.has(c):
 		_refund_part(FEATURE_COST[features[c]])
+		if features[c].begins_with("lock_"):
+			styles.erase(c)
 		features.erase(c)
 	var i := idx(c)
 	if (bld[i] != B.NONE and bld_fixed[i] == 0) or planted[i] == 1:
@@ -651,14 +639,16 @@ func add_verge(a: Vector2i, b: Vector2i, kind: String) -> String:
 ## Adds moorings or wide water to a stretch of working canal.
 func add_feature(c: Vector2i, kind: String) -> String:
 	if not has_canal(c) or link_dirs(c, [L.CANAL]).size() + int(_portal_cell(c)) > 2:
-		return "Moorings and wide water go on a plain stretch of canal"
-	if lock_at(c).x >= 0 or has_bridge(c):
-		return "Not at a lock or bridge"
+		return "Moorings, locks and wide water go on a plain stretch of canal"
+	if has_bridge(c):
+		return "Not under a bridge"
 	if features.has(c):
-		return "There's already %s here - bulldoze it first" % ("moorings" if features[c] == "moorings" else "wide water")
+		return "There's already %s here - bulldoze it first" % FEATURE_NAME[features[c]]
 	if not unlimited and FEATURE_COST[kind] > coins:
 		return "Not enough coins (%d needed)" % FEATURE_COST[kind]
 	features[c] = kind
+	if kind.begins_with("lock_"):
+		styles[c] = kind.trim_prefix("lock_")
 	_spend(FEATURE_COST[kind])
 	recompute()
 	return ""
@@ -706,19 +696,6 @@ func add_exit(c: Vector2i, d: Vector2i, type: int, style: String) -> String:
 	return ""
 
 
-## Canal links that step between levels: [[lower cell, upper cell], ...].
-func locks() -> Array:
-	var out := []
-	for k in links:
-		if links[k] != L.CANAL:
-			continue
-		var cells := key_cells(k)
-		var dh := height(cells[0]) - height(cells[1])
-		if dh != 0:
-			out.append([cells[1], cells[0]] if dh > 0 else cells)
-	return out
-
-
 # --- Goals ------------------------------------------------------------------
 
 func boat_income() -> int:
@@ -747,8 +724,36 @@ func score() -> int:
 	return stars() * 1000 + coins + charm * 5
 
 
+func _index_rivers() -> void:
+	river_next.clear()
+	river_ends.clear()
+	for course in rivers:
+		for i in course.size():
+			var c: Vector2i = course[i]
+			var next: Array[Vector2i] = []
+			if i > 0:
+				next.append(course[i - 1])
+			if i < course.size() - 1:
+				next.append(course[i + 1])
+			river_next[c] = next
+		for c: Vector2i in [course[0], course[course.size() - 1]]:
+			if open_ends.has(c):
+				river_ends.append({"cell": c, "dir": open_ends[c]})
+
+
+## Every place boats enter and leave the map: the canals' portals, then rivers.
+func water_ends() -> Array:
+	var out := []
+	for p in portals:
+		out.append({"cell": p.cell, "dir": p.dir})
+	out.append_array(river_ends)
+	return out
+
+
 func recompute() -> void:
 	version += 1
+	if river_next.is_empty() and not rivers.is_empty():
+		_index_rivers()
 	adj.clear()
 	for k in links:
 		var cells := key_cells(k)
@@ -771,6 +776,12 @@ func recompute() -> void:
 			group_of[j] = group_of[i]
 			for c in path:
 				network[c] = true
+	traffic.clear()
+	var ends := water_ends()
+	for i in ends.size():
+		for j in range(i + 1, ends.size()):
+			if not path_between(ends[i].cell, ends[j].cell).is_empty():
+				traffic.append([i, j])
 	linked = 1
 	var sizes := {}
 	for g in group_of:
@@ -787,9 +798,6 @@ func recompute() -> void:
 		if bld_fixed[i] == 0:
 			charm += CHARM.get(bld[i], 0)
 		charm += int(planted[i])
-	for pair in locks():
-		if not fixed.has(key(pair[0], pair[1])):
-			charm += LOCK_CHARM
 	for k in verges:
 		charm += VERGE_CHARM.get(verges[k], 0)
 	for c in features:
@@ -830,6 +838,17 @@ func _place_connected(p: Dictionary) -> bool:
 	return false
 
 
+## Cells a boat can move to from `c`: along canal, and along a river's course.
+func water_next(c: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for e in adj.get(c, []):
+		if e[1] == L.CANAL:
+			out.append(e[0])
+	for n in river_next.get(c, []):
+		out.append(n)
+	return out
+
+
 ## Shortest navigable route between two cells, or [] if there is none.
 func path_between(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 	var prev := {from: from}
@@ -840,10 +859,10 @@ func path_between(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 		head += 1
 		if c == to:
 			break
-		for e in adj.get(c, []):
-			if e[1] == L.CANAL and not prev.has(e[0]):
-				prev[e[0]] = c
-				queue.append(e[0])
+		for n in water_next(c):
+			if not prev.has(n):
+				prev[n] = c
+				queue.append(n)
 	var path: Array[Vector2i] = []
 	if not prev.has(to):
 		return path
