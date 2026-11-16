@@ -57,13 +57,19 @@ with a gap and a front path or drive on the side its path or road arrives.
 Pubs, shops, cafes, farms, boatyards and manors get a car park once a road
 reaches them.
 
-A path or road that crosses water gets a bridge automatically (+20). A crossing is always one bridge, however many cells of water it spans. The deck follows the road at any angle (a slanting crossing gets a longer deck) and is sized to the water's width. Bridges are brick or stone arches, or a modern concrete beam bridge, and boats always pass under them.
+Maps come with rivers, silted old canal and the places to serve; roads only have their two ends at the edge of the map (the player lays the road between them). A path drawn along a road becomes a pavement on it (3 a length; dragging a path beside a road hops onto the road).
+
+A path or road that crosses water gets a bridge automatically (+20), and must cross at 30 degrees or more (never along the water, and never with a junction on the bridge). A crossing is always one bridge, however many cells of water it spans. The deck follows the road at any angle (a slanting crossing gets a longer deck) and is sized to the water's width. Bridges are brick or stone arches, or a modern concrete beam bridge, and boats always pass under them.
 
 Restored canal keeps its Victorian look (brick edging, cinder towpath); newly
 dug cut has pale stone coping and a fresh gravel towpath.
 
-**Stars:** link every canal; connect every place (the badge over it shows
-whether it wants a path or a road); reach the charm goal.
+**Stars** (three checklists in the corner; each star needs the one before):
+1. Open the waterway - link every canal end.
+2. Connect the countryside - every place connected (the badge shows whether it wants a path or a road) and every road's two ends joined.
+3. Make it cosy - the moorings, buildings you have built, and trees or hedges the level asks for.
+
+Press **Finish level** (or meet every goal) to end the level and lock in the stars. The results screen offers Free play (keep building, stars stay locked), Replay, and Next level. Replay to earn the stars you missed.
 The Daily Cut also gives a score: stars first, then coins left and charm.
 
 ## Modes

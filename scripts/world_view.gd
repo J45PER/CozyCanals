@@ -1260,6 +1260,18 @@ func _emit_land_lines(c: Vector2i, mb: Art.MB) -> void:
 	var node := _node(c)
 	var z := ground_z(node) + 0.6
 	var smooth: bool = lines.size() == 2 and lines[0][1] == lines[1][1]
+	# Pavements: a pale strip either side of a road that has a path laid along it.
+	var paved := false
+	for line in lines:
+		if world.pavements.has(world.key(c, c + Vector2i(line[0]))):
+			var st: Dictionary = LINE_STYLE[line[1]]
+			var hw: float = st.edge + 0.1
+			var j := _join(c, Vector2i(line[0]))
+			_band(mb, j, (j + node) * 0.5, node, -hw, hw, z, z, z, Color("d6d1c4"), true)
+			paved = true
+	if paved:
+		var top_st: Dictionary = LINE_STYLE[lines[0][1]]
+		mb.disc(Art.iso(node, z), (top_st.edge + 0.1) * HW, (top_st.edge + 0.1) * HH, Color("d6d1c4"), 18)
 	for layer in ["edge", "w"]:
 		if smooth:
 			var st: Dictionary = LINE_STYLE[lines[0][1]]

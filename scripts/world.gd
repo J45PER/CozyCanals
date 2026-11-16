@@ -44,6 +44,7 @@ const STYLE_NAME := {"gravel": "gravel path", "tarmac": "tarmac path", "dirt": "
 const VERGE_TOOLS := {Tool.HEDGE_ROW: "hedge", Tool.WALL_ROW: "wall", Tool.FENCE_ROW: "fence"}
 const VERGE_COST := {"hedge": 3, "wall": 4, "fence": 2}
 const VERGE_CHARM := {"hedge": 1, "wall": 1, "fence": 0}
+const PAVEMENT_COST := 3    # a path drawn along a road becomes a pavement
 const ROUNDABOUT_COST := 30
 const EXIT_COST := 15
 const CLEAR_TREES_COST := 6
@@ -88,6 +89,7 @@ var styles := {}      # cell -> "brick", "stone" or "concrete" for a bridge rebu
 var style_paid := {}  # cell -> coins spent restyling it
 var link_style := {}  # edge key -> path or road surface ("gravel", "lane", ...)
 var verges := {}      # edge key -> "hedge", "wall" or "fence" lining a path or road
+var pavements := {}   # edge key -> true where a path was laid alongside a road
 var roundabouts := {} # cell -> true
 var exits := {}       # edge cell -> [direction, L, style] for a path or road leaving the map
 var features := {}    # canal cell -> "moorings", "basin", "lock_stone" or "lock_brick"
@@ -396,6 +398,18 @@ func check_link(a: Vector2i, b: Vector2i, type: int, style := "") -> Dictionary:
 		else:
 			r.err = "There's a %s here - bulldoze it first" % STYLE_NAME.get(have, "path")
 		return r
+	if cur == L.ROAD and type == L.PATH:
+		# A path drawn along a road becomes a pavement beside it.
+		if fixed.has(key(a, b)):
+			r.err = "That part of the road belongs to the map"
+		elif pavements.has(key(a, b)):
+			r.err = "same"
+		else:
+			r.pavement = true
+			r.cost = _scaled(PAVEMENT_COST, diagonal)
+			if not unlimited and r.cost > coins:
+				r.err = "Not enough coins (%d needed)" % r.cost
+		return r
 	if cur == L.DERELICT and type == L.CANAL:
 		r.restore = true
 		r.cost = _scaled(DREDGE_COST, diagonal)
@@ -451,6 +465,12 @@ func add_link(a: Vector2i, b: Vector2i, type: int, style := "") -> String:
 	if r.err != "":
 		return r.err
 	var k := key(a, b)
+	if r.get("pavement", false):
+		pavements[k] = true
+		paid[k] = paid.get(k, 0) + r.cost
+		_spend(r.cost)
+		recompute()
+		return ""
 	links[k] = type
 	if type == L.PATH or type == L.ROAD:
 		link_style[k] = style
@@ -622,6 +642,7 @@ func bulldoze(c: Vector2i) -> String:
 		_refund_part(paid.get(k, 0) + VERGE_COST.get(verges.get(k, ""), 0))
 		paid.erase(k)
 		verges.erase(k)
+		pavements.erase(k)
 		if restored.has(k):
 			restored.erase(k)
 			links[k] = L.DERELICT
@@ -940,6 +961,7 @@ func recompute() -> void:
 		charm += int(planted[i])
 	for k in verges:
 		charm += VERGE_CHARM.get(verges[k], 0)
+	charm += pavements.size() / 2
 	for c in features:
 		charm += FEATURE_CHARM.get(features[c], 0)
 	for c in adj:

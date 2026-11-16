@@ -618,6 +618,13 @@ func _draw_line_to(c: Vector2i, f: Vector2, first: bool) -> void:
 	var touched: Array[Vector2i] = [_last_cell]
 	while _last_cell != c:
 		var step := _last_cell + (c - _last_cell).sign()
+		# A path drawn alongside a road hops onto the road, which makes a pavement.
+		var snapped := false
+		if World.TOOL_LINK.get(tool, -1) == L.PATH:
+			var on_road := _road_snap(_last_cell, step)
+			if on_road.x >= 0:
+				step = on_road
+				snapped = true
 		var free := world.can_move_node(step)
 		if not _draw_link(_last_cell, step):
 			# Refused (the message says why): stay put so the finger can
@@ -627,10 +634,29 @@ func _draw_line_to(c: Vector2i, f: Vector2, first: bool) -> void:
 			_stroke_best[step] = 9.0
 		_last_cell = step
 		touched.append(step)
+		if snapped and maxi(absi(step.x - c.x), absi(step.y - c.y)) <= 1:
+			break
 	for cell in touched:
 		if _stroke_best.has(cell):
 			_follow(cell, _last_f, f)
 	_last_f = f
+
+
+# When a path is being drawn from a road cell and the finger heads alongside
+# the road, returns the next road cell to hop onto (else (-1, -1)).
+func _road_snap(from: Vector2i, step: Vector2i) -> Vector2i:
+	var heading := Vector2(step - from)
+	if heading == Vector2.ZERO:
+		return Vector2i(-1, -1)
+	for e in world.adj.get(from, []):
+		if e[1] != L.ROAD:
+			continue
+		var n: Vector2i = e[0]
+		if world.fixed.has(world.key(from, n)) or maxi(absi(n.x - step.x), absi(n.y - step.y)) > 1:
+			continue
+		if heading.normalized().dot(Vector2(n - from).normalized()) >= 0.5:
+			return n
+	return Vector2i(-1, -1)
 
 
 # Moves a cell's node to where the finger's path came closest to its middle.

@@ -167,6 +167,13 @@ func _init() -> void:
 	var along := tiny.add_link(Vector2i(0, 4), Vector2i(1, 4), L.PATH)
 	var along_land := tiny.add_link(Vector2i(2, 3), Vector2i(2, 4), L.CANAL)
 	angles = angles and along != "" and along != "same"
+	# A path drawn along a road becomes a pavement, and goes when the road does.
+	var paved := tiny.add_link(Vector2i(6, 1), Vector2i(7, 1), L.ROAD) == ""
+	var pave_cost := tiny.coins
+	paved = paved and tiny.add_link(Vector2i(6, 1), Vector2i(7, 1), L.PATH) == "" and tiny.pavements.size() == 1
+	paved = paved and tiny.add_link(Vector2i(6, 1), Vector2i(7, 1), L.PATH) == "same"
+	paved = paved and tiny.bulldoze(Vector2i(6, 1)) == "" and tiny.pavements.is_empty()
+	angles = angles and paved
 	print("crossing angles  %s  (%s)" % ["ok" if angles else "FAIL", along])
 	ok = ok and angles
 	quit(0 if ok else 1)
