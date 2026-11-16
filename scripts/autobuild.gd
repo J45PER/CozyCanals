@@ -65,7 +65,10 @@ static func build(world: World, path: Array[Vector2i], type: int) -> bool:
 		for cell: Vector2i in [path[i - 1], c]:
 			if world.terrain_at(cell) == World.T.WOOD:
 				world.bulldoze(cell)
-		var free := world.can_move_node(c)
+		# Keep lines straight where they meet water or other lines, so crossings stay square.
+		var free := world.can_move_node(c) and not _near_crossing(world, c)
+		if world.link(path[i - 1], c) == type:
+			continue          # already there (for instance the stub at a road's end)
 		var err := world.add_link(path[i - 1], c, type)
 		if free and err == "":
 			var n := (c.x * 73856093) ^ (c.y * 19349663)
@@ -73,6 +76,15 @@ static func build(world: World, path: Array[Vector2i], type: int) -> bool:
 		if err != "" and err != "same":
 			return false
 	return not path.is_empty()
+
+
+static func _near_crossing(world: World, c: Vector2i) -> bool:
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			var n := c + Vector2i(dx, dy)
+			if world.terrain_at(n) == World.T.RIVER or world.adj.has(n):
+				return true
+	return false
 
 
 ## Joins every portal with canal. Returns false if any could not be reached.
@@ -83,6 +95,18 @@ static func link_portals(world: World) -> bool:
 		if not build(world, path, L.CANAL):
 			return false
 	return true
+
+
+## Joins the two ends of every road the map asks for.
+static func connect_roads(world: World) -> bool:
+	var ok := true
+	for r in world.road_sets:
+		if r.ok:
+			continue
+		var target: Vector2i = r.b.cell
+		var path := route(world, r.a.cell, func(c): return c == target, L.ROAD)
+		ok = build(world, path, L.ROAD) and ok
+	return ok
 
 
 ## Gives every place the path or road it wants.
@@ -108,4 +132,4 @@ static func _on_fixed_road(world: World, c: Vector2i) -> bool:
 
 
 static func run(world: World) -> bool:
-	return link_portals(world) and connect_places(world)
+	return link_portals(world) and connect_roads(world) and connect_places(world)

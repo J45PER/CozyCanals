@@ -168,6 +168,7 @@ var _done_title: Label
 var _done_text: Label
 var _done_stars: StarRow
 var _done_next: Button
+var _finish_btn: Button
 var _menu: PanelContainer
 var _menu_home: Control
 var _menu_levels: Control
@@ -690,11 +691,17 @@ func _refresh() -> void:
 	_coins.text = str(world.coins)
 	var open := world.all_linked()
 	var n_places := world.places.size()
-	_set_goal(0, open, "Canals linked %d / %d" % [world.linked if world.linked > 1 else 0, world.portals.size()])
-	_set_goal(1, open and world.places_ok == n_places, "Places connected %d / %d" % [world.places_ok, n_places])
-	_set_goal(2, open and world.charm >= world.charm_goal, "Charm %d / %d" % [world.charm, world.charm_goal])
+	var goals := world.objectives()
+	var earned := world.stars()
 	for i in 3:
+		var bits := []
+		for it in goals[i].items:
+			bits.append("%s %d/%d" % [it.text, it.have, it.need])
+		_set_goal(i, i < earned, "  ·  ".join(bits))
 		_goal_stars[i].get_parent().visible = not world.unlimited
+	_finish_btn.visible = not world.unlimited
+	_finish_btn.disabled = not world.finished and world.live_stars() < 1
+	_finish_btn.text = "Results" if world.finished else "Finish level"
 	if world.net_version != _net_version:
 		# The water changed, so boats in transit may no longer have a route.
 		_net_version = world.net_version
@@ -702,7 +709,7 @@ func _refresh() -> void:
 		_next_boat = 0.8
 	var joined := world.linked > 1
 	if joined and not _was_joined:
-		_show_toast("Boats are coming through!")
+		_show_toast("Boats are coming through! Press Finish level when you're happy.")
 	_was_joined = joined
 	if _done.visible:
 		_fill_done_panel()
@@ -719,28 +726,43 @@ func _on_boat_arrived() -> void:
 	world.boat_arrived()
 	_coins.modulate = GOLD
 	create_tween().tween_property(_coins, "modulate", Color.WHITE, 0.8)
-	if not _celebrated and world.all_linked() and not world.unlimited:
+	# Every goal met: the level ends by itself.
+	if not _celebrated and not world.unlimited and not world.finished and world.live_stars() == 3:
 		_celebrated = true
-		_fill_done_panel()
-		_done.show()
+		_on_finish()
+
+
+## Ends the level (or shows its results again), locking in the stars.
+func _on_finish() -> void:
+	if not world.finished and not world.finish():
+		_show_toast("Link the canals first - that earns the first star")
+		return
+	_fill_done_panel()
+	_done.show()
+	_record_result()
 
 
 func _fill_done_panel() -> void:
 	var stars := world.stars()
 	_done_stars.filled = stars
-	_done_title.text = "A perfect waterway!" if stars == 3 else "The canal is open!"
+	_done_title.text = ["", "The waterway is open!", "A well connected countryside!", "A perfect waterway!"][stars]
 	var lines := []
-	if world.places_ok < world.places.size():
-		lines.append("Connect every place for another star.")
-	if world.charm < world.charm_goal:
-		lines.append("Add homes, shops, pubs and trees for charm.")
-	if lines.is_empty():
-		lines.append("Every canal linked, every place connected, and charming with it.")
+	for g in world.objectives():
+		if g.done:
+			lines.append("%s - done" % g.title)
+		else:
+			var bits := []
+			for it in g.items:
+				if not it.done:
+					bits.append("%s %d/%d" % [it.text, it.have, it.need])
+			lines.append("%s - still needs %s" % [g.title, ", ".join(bits)])
+	if stars < 3:
+		lines.append("")
+		lines.append("Replay the level to earn the rest.")
 	if mode == "daily":
 		lines.append("Today's score: %d   (best %d)" % [world.score(), maxi(world.score(), _daily_score())])
 	_done_text.text = "\n".join(lines)
 	_done_next.text = "Next level" if mode == "journey" and level_idx < Levels.JOURNEY.size() - 1 else "Menu"
-	_record_result()
 
 
 func _daily_key() -> String:
@@ -978,11 +1000,14 @@ func _build_hud() -> void:
 		var row := _hbox(stats_box)
 		var star := StarRow.new(18, 1)
 		row.add_child(star)
-		var lbl := _label("", 15)
-		lbl.custom_minimum_size = Vector2(190, 0)
+		var lbl := _label("", 14)
+		lbl.custom_minimum_size = Vector2(250, 0)
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		row.add_child(lbl)
 		_goal_stars.append(star)
 		_goal_labels.append(lbl)
+	_finish_btn = _button("Finish level", _on_finish)
+	stats_box.add_child(_finish_btn)
 
 	# Build bar, bottom centre: categories, with the open one's tools above.
 	var bar := PanelContainer.new()
@@ -1058,7 +1083,8 @@ func _build_hud() -> void:
 	done_box.add_child(_done_text)
 	var btn_row := _hbox(done_box, 12)
 	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_row.add_child(_button("Keep building", func(): _done.hide()))
+	btn_row.add_child(_button("Free play", func(): _done.hide()))
+	btn_row.add_child(_button("Replay", func(): _restart()))
 	_done_next = _button("Next level", _on_done_next)
 	btn_row.add_child(_done_next)
 

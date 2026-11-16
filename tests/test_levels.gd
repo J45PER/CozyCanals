@@ -52,6 +52,10 @@ func _check(label: String, params: Dictionary) -> bool:
 		print("  short stubs of old canal: ", stubs)
 	# A sensible solution fits the budget and earns the first two stars.
 	ok = ok and AutoBuild.run(world) and world.all_linked() and world.stars() >= 2 and world.coins >= 0
+	var wanted_roads: int = params.get("roads", 0)
+	ok = ok and world.roads_ok == world.road_sets.size() and world.road_sets.size() <= wanted_roads
+	# Roads are only ends: nothing joins them until the player builds it.
+	ok = ok and world.finish() and world.stars() >= 2 and world.finished_stars == world.stars()
 	var n := world.portals.size()
 	ok = ok and world.pairs.size() == n * (n - 1) / 2
 	var left := world.coins
@@ -145,4 +149,24 @@ func _init() -> void:
 						edge_done = true
 	print("roads extras     %s  roundabout=%s exit=%s" % ["ok" if extras else "FAIL", road_cell.x >= 0, edge_done])
 	ok = ok and extras and edge_done
+	# Crossing water: a road may meet a canal squarely or at 45 degrees, never along it.
+	var tiny := World.new()
+	tiny.setup(9, 9)
+	tiny.terrain.fill(World.T.GRASS)
+	tiny.unlimited = true
+	for x in range(1, 7):
+		tiny.add_fixed_link(Vector2i(x, 4), Vector2i(x + 1, 4), L.CANAL)
+	tiny.recompute()
+	var angles := true
+	angles = angles and tiny.add_link(Vector2i(3, 3), Vector2i(3, 4), L.ROAD) == ""
+	angles = angles and tiny.add_link(Vector2i(3, 4), Vector2i(3, 5), L.ROAD) == ""
+	angles = angles and tiny.add_link(Vector2i(5, 3), Vector2i(6, 4), L.PATH) == ""
+	angles = angles and tiny.add_link(Vector2i(6, 4), Vector2i(7, 5), L.PATH) == ""
+	var junction := tiny.add_link(Vector2i(2, 3), Vector2i(3, 4), L.PATH)
+	angles = angles and junction != "" and junction != "same"
+	var along := tiny.add_link(Vector2i(0, 4), Vector2i(1, 4), L.PATH)
+	var along_land := tiny.add_link(Vector2i(2, 3), Vector2i(2, 4), L.CANAL)
+	angles = angles and along != "" and along != "same"
+	print("crossing angles  %s  (%s)" % ["ok" if angles else "FAIL", along])
+	ok = ok and angles
 	quit(0 if ok else 1)

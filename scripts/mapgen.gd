@@ -10,12 +10,12 @@ extends RefCounted
 ##   river     true to add a river
 ##   derelict  0..1 share of the obvious route that survives as silted canal
 ##   places    villages, pubs and churches wanting a path to the canal
-##   roads     existing roads crossing the map
+##   roads     pairs of road ends for the player to join (the roads themselves are not built)
 ##   farms     farms wanting a road to an existing road
 ##   woods     0..1 woodland cover
 ##   budget    starting coins as a multiple of a sensible solution's cost
 ##   unlimited true for free building with no budget
-##   charm_goal
+##   cosy      [moorings, buildings, trees and hedges] the third star asks for
 
 const World := preload("res://scripts/world.gd")
 const AutoBuild := preload("res://scripts/autobuild.gd")
@@ -68,7 +68,8 @@ static func _make(p: Dictionary) -> World:
 	world.setup(w, h)
 	world.title = p.get("name", "Open Country")
 	world.blurb = p.get("blurb", "")
-	world.charm_goal = p.get("charm_goal", 20)
+	var cosy: Array = p.get("cosy", [0, 0, 0])
+	world.cosy = [int(cosy[0]), int(cosy[1]), int(cosy[2])]
 	world.allow_roads = p.get("roads", 0) > 0 or p.get("unlimited", false)
 
 	var noise := FastNoiseLite.new()
@@ -160,7 +161,10 @@ static func _make(p: Dictionary) -> World:
 				world.open_ends[a.cell] = a.dir
 				world.open_ends[b.cell] = b.dir
 
-	# Existing roads.
+	# Road ends, for the player to join. Only the two ends are built: a short
+	# stub at each edge. The line that would have joined them is remembered, so
+	# farms can be sited along it.
+	var road_line := {}
 	for i in int(p.get("roads", 0)):
 		var ang := base + 1.9 + i * 1.3
 		var a := _edge_at_angle(world, edge, ang, centre, taken, 4)
@@ -172,15 +176,19 @@ static func _make(p: Dictionary) -> World:
 			continue
 		taken.append(b.cell)
 		var line := _wander(world, a.cell, b.cell, noise, 500.0 + i * 50.0, false)
-		_smooth(world, line, placed)
-		for j in range(1, line.size()):
-			world.add_fixed_link(line[j - 1], line[j], L.ROAD, "carriageway")
+		if line.size() < 6:
+			continue
+		for e: Dictionary in [a, b]:
+			var inner: Vector2i = e.cell - e.dir
+			for cell: Vector2i in [e.cell, inner, inner - e.dir]:
+				if world.in_bounds(cell) and world.terrain[world.idx(cell)] != T.RIVER:
+					world.terrain[world.idx(cell)] = T.GRASS
+			world.add_fixed_link(e.cell, inner, L.ROAD, "carriageway")
+			world.open_ends[e.cell] = e.dir
 		for c in line:
-			if world.terrain[world.idx(c)] != T.RIVER:
-				world.terrain[world.idx(c)] = T.GRASS
-		if line.size() > 1:
-			world.open_ends[a.cell] = a.dir
-			world.open_ends[b.cell] = b.dir
+			road_line[c] = true
+		world.road_sets.append({"a": {"cell": a.cell, "dir": a.dir}, "b": {"cell": b.cell, "dir": b.dir},
+			"name": "%s road" % names[(count + i) % names.size()], "ok": false})
 	world.recompute()
 
 	# The "obvious" canal line between the portals; parts of it survive as
@@ -197,10 +205,7 @@ static func _make(p: Dictionary) -> World:
 	world.recompute()
 
 	_site_places(world, rng, int(p.get("places", 0)), ideal.keys(), 2, 4, L.PATH)
-	var road_cells := []
-	for c in world.adj:
-		if world.land_links(c) > 0:
-			road_cells.append(c)
+	var road_cells := road_line.keys()
 	if not road_cells.is_empty():
 		_site_places(world, rng, int(p.get("farms", 0)), road_cells, 2, 4, L.ROAD, ideal)
 	world.recompute()

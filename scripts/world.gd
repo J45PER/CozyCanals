@@ -99,12 +99,16 @@ var portals: Array = []     # [{cell, dir, name}] canals running off the map
 var places: Array = []      # [{cell, kind, need, name, ok}] to be connected
 var rivers: Array = []      # [Array[Vector2i]] river courses, for drawing
 var open_ends := {}         # cell -> direction a road or river runs off the map
+var road_sets: Array = []   # [{a: {cell, dir}, b: {cell, dir}, name, ok}] road ends to be joined
+var cosy := [0, 0, 0]       # what the third star asks for: moorings, buildings, greenery
+var finished := false       # the player has ended the level
+var finished_stars := 0
+var _snapshot: Array = []   # the goals as they stood when the level ended
 
 var coins := 0
 var spent := 0
 var unlimited := false
 var allow_roads := false
-var charm_goal := 0
 
 # Derived state, refreshed by recompute().
 var adj := {}               # cell -> [[neighbour cell, L], ...]
@@ -112,6 +116,7 @@ var pairs: Array = []       # [i, j] portal indices joined by navigable water
 var linked := 1             # size of the largest group of joined portals
 var network := {}           # cells on the routes between joined portals
 var places_ok := 0
+var roads_ok := 0
 var charm := 0
 var version := 0            # bumped on every change
 var net_version := 0        # bumped when navigable water changes
@@ -319,6 +324,58 @@ func is_bridge(c: Vector2i) -> bool:
 	return has_water(c) and land_links(c) >= 2
 
 
+## Roads and paths must cross water at least this steeply (sine of 30 degrees).
+const MIN_CROSS_SIN := 0.5
+
+
+## Directions of the water running through `c` (canals, old canals, river), as
+## vectors between node positions.
+func water_axes(c: Vector2i) -> Array[Vector2]:
+	var out: Array[Vector2] = []
+	for e in adj.get(c, []):
+		if e[1] == L.CANAL or e[1] == L.DERELICT:
+			out.append(node(e[0]) - node(c))
+	for n in river_next.get(c, []):
+		out.append(node(n) - node(c))
+	return out
+
+
+## Directions of the paths and roads running through `c`.
+func land_axes(c: Vector2i) -> Array[Vector2]:
+	var out: Array[Vector2] = []
+	for e in adj.get(c, []):
+		if e[1] == L.PATH or e[1] == L.ROAD:
+			out.append(node(e[0]) - node(c))
+	return out
+
+
+## True if lines running along `v` and `u` meet at 30 degrees or more.
+static func square_enough(v: Vector2, u: Vector2) -> bool:
+	var m := v.length() * u.length()
+	return m < 0.0001 or absf(v.cross(u)) / m >= MIN_CROSS_SIN
+
+
+## Why a link from a to b could not cross the water or land line already at a
+## or b, or "".
+func crossing_error(a: Vector2i, b: Vector2i, type: int) -> String:
+	var v := node(b) - node(a)
+	for c: Vector2i in [a, b]:
+		var wet := has_water(c) or terrain_at(c) == T.RIVER
+		if (type == L.PATH or type == L.ROAD) and wet and land_links(c) >= 2:
+			return "A bridge can't have a junction on it"
+		if type == L.CANAL and land_links(c) >= 3:
+			return "Water can't run under a junction"
+		if type == L.PATH or type == L.ROAD:
+			for u in water_axes(c):
+				if not square_enough(v, u):
+					return "Cross the water more squarely - at least 30 degrees"
+		elif type == L.CANAL:
+			for u in land_axes(c):
+				if not square_enough(v, u):
+					return "A bridge needs the water to cross the road at 30 degrees or more"
+	return ""
+
+
 ## What adding a link would involve: {err, cost, lock, restore}.
 ## err is "" if allowed, "same" if the link already exists.
 func check_link(a: Vector2i, b: Vector2i, type: int, style := "") -> Dictionary:
@@ -348,6 +405,10 @@ func check_link(a: Vector2i, b: Vector2i, type: int, style := "") -> Dictionary:
 	else:
 		if diagonal and link(Vector2i(a.x + d.x, a.y), Vector2i(a.x, a.y + d.y)) != -1:
 			r.err = "Can't cross mid-way - meet at a point instead"
+			return r
+		var cross := crossing_error(a, b, type)
+		if cross != "":
+			r.err = cross
 			return r
 		for c: Vector2i in [a, b]:
 			if terrain_at(c) == T.ROCK:
@@ -714,10 +775,85 @@ func all_linked() -> bool:
 	return linked == portals.size()
 
 
+func count_features(kind: String) -> int:
+	var n := 0
+	for c in features:
+		n += int(features[c] == kind)
+	return n
+
+
+## Buildings the player has put up (not the map's own, and not add-ons).
+func count_built() -> int:
+	var n := 0
+	for i in w * h:
+		if bld_fixed[i] == 0 and bld[i] != B.NONE and bld[i] not in ADDONS:
+			n += 1
+	return n
+
+
+## Trees the player planted, plus lengths of hedge, wall and fence.
+func count_greenery() -> int:
+	var n := verges.size()
+	for i in w * h:
+		n += int(planted[i])
+	return n
+
+
+## The three stars and what each asks for, as tangible checklists:
+## [{title, done, items: [{text, have, need, done}]}]. A star only counts once
+## the one before it is earned.
+func objectives() -> Array:
+	if finished and not _snapshot.is_empty():
+		return _snapshot
+	var first := [_item("Canals linked", linked, portals.size())]
+	var second := []
+	if not places.is_empty():
+		second.append(_item("Places connected", places_ok, places.size()))
+	if not road_sets.is_empty():
+		second.append(_item("Roads joined", roads_ok, road_sets.size()))
+	if second.is_empty():
+		second.append(_item("Moorings", count_features("moorings"), 1))
+	var third := []
+	for pair in [["Moorings", count_features("moorings"), cosy[0]], ["Buildings built", count_built(), cosy[1]],
+			["Trees and hedges", count_greenery(), cosy[2]]]:
+		if pair[2] > 0:
+			third.append(_item(pair[0], pair[1], pair[2]))
+	var out := []
+	for g in [["Open the waterway", first], ["Connect the countryside", second], ["Make it cosy", third]]:
+		var all_done := true
+		for it in g[1]:
+			all_done = all_done and it.done
+		out.append({"title": g[0], "items": g[1], "done": all_done})
+	return out
+
+
+static func _item(text: String, have: int, need: int) -> Dictionary:
+	return {"text": text, "have": mini(have, need), "need": need, "done": have >= need}
+
+
 func stars() -> int:
-	if not all_linked():
+	if finished:
+		return finished_stars
+	return live_stars()
+
+
+## Stars the map would earn right now.
+func live_stars() -> int:
+	var g := objectives()
+	if not g[0].done:
 		return 0
-	return 1 + int(places_ok == places.size()) + int(charm >= charm_goal)
+	return 1 + int(g[1].done) + int(g[1].done and g[2].done)
+
+
+## Ends the level, locking in the stars earned so far.
+func finish() -> bool:
+	if finished or live_stars() < 1:
+		return false
+	finished_stars = live_stars()
+	_snapshot = objectives()
+	finished = true
+	changed.emit()
+	return true
 
 
 func score() -> int:
@@ -792,6 +928,10 @@ func recompute() -> void:
 	for p in places:
 		p.ok = _place_connected(p)
 		places_ok += int(p.ok)
+	roads_ok = 0
+	for r in road_sets:
+		r.ok = not path_between_roads(r.a.cell, r.b.cell).is_empty()
+		roads_ok += int(r.ok)
 
 	charm = 0
 	for i in w * h:
@@ -809,6 +949,30 @@ func recompute() -> void:
 					charm += BRIDGE_CHARM
 					break
 	changed.emit()
+
+
+## A chain of road links from `a` to `b`, or empty.
+func path_between_roads(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
+	var prev := {a: a}
+	var queue: Array[Vector2i] = [a]
+	var head := 0
+	while head < queue.size():
+		var c := queue[head]
+		head += 1
+		if c == b:
+			var out: Array[Vector2i] = []
+			var cur := b
+			while cur != a:
+				out.append(cur)
+				cur = prev[cur]
+			out.append(a)
+			out.reverse()
+			return out
+		for e in adj.get(c, []):
+			if e[1] == L.ROAD and not prev.has(e[0]):
+				prev[e[0]] = c
+				queue.append(e[0])
+	return []
 
 
 # A place wanting a PATH needs a walk (path or road) to working canal.

@@ -173,10 +173,17 @@ func _run() -> void:
 	coins = world.coins
 	await create_timer(26.0).timeout
 	_expect("boat passed through and paid", world.coins > coins)
-	_expect("completion panel shown", main._done.visible)
+	# The level ends when the player says so (or every goal is met): stars lock in.
+	_expect("finish is offered once the canal is open", not main._finish_btn.disabled and not main.world.finished)
+	main._on_finish()
+	await create_timer(0.3).timeout
+	_expect("results panel shown", main._done.visible and main.world.finished and main.world.stars() >= 1)
+	var locked: int = main.world.stars()
+	main.world.place(T.PUB, Vector2i(0, 0))
+	_expect("stars stay locked after finishing", main.world.stars() == locked)
 	var saved := ConfigFile.new()
 	saved.load("user://save.cfg")
-	_expect("stars saved", saved.get_value("journey", "0", 0) >= 2)
+	_expect("stars saved", saved.get_value("journey", "0", 0) >= 1)
 
 	# Other modes start cleanly.
 	main.start_daily()
@@ -196,11 +203,13 @@ func _run() -> void:
 	_expect("river counts as navigable water", not main.world.river_ends.is_empty() and main.world.water_ends().size() > main.world.portals.size())
 	main.show_menu()
 	await create_timer(0.3).timeout
-	_expect("back to menu", main._menu.visible and main._level_stars[0].filled >= 2)
+	_expect("back to menu", main._menu.visible and main._level_stars[0].filled >= 1)
 
 	# Cars stay on the drawn roads, junctions and bridges included.
 	main.start_free(7)
 	await create_timer(0.3).timeout
+	AutoBuild.run(main.world)        # the map only has road ends: build the roads between them
+	await create_timer(0.6).timeout
 	var v = main.view
 	v.clear_boats()
 	var worst := 0.0

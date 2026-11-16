@@ -2141,6 +2141,10 @@ func _draw_overlays(ci: CanvasItem) -> void:
 	if show_labels:
 		for p in world.portals:
 			_plaque(ci, Art.iso(_label_anchor(p), _zc(p.cell) + 30.0), p.name, 12, Color("f6ecd4"), Color("4a3b2e"))
+		for r in world.road_sets:
+			for end in [r.a, r.b]:
+				_plaque(ci, Art.iso(_label_anchor(end), _zc(end.cell) + 30.0), r.name + (" - joined" if r.ok else ""), 12,
+					Color("e4eadb") if r.ok else Color("f6ecd4"), Color("4a3b2e"))
 		for p in world.places:
 			var top := cell_center(p.cell) + Vector2(0, -minf(_place_top.get(p.cell, 34.0), 62.0) - 2.0)
 			var extent := _font.get_string_size(p.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 11)
