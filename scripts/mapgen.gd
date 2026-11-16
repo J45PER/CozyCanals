@@ -427,6 +427,11 @@ static func _site_places(world: World, rng: RandomNumberGenerator, count: int, a
 # through each cell so they wander a little.
 static func _wander_nodes(world: World, rng: RandomNumberGenerator) -> void:
 	var cells := world.adj.keys()
+	# Rivers wander too, and a canal dug along one follows the same course.
+	for course in world.rivers:
+		for c in course:
+			if not cells.has(c):
+				cells.append(c)
 	cells.sort()
 	for c: Vector2i in cells:
 		var off := Vector2(rng.randf_range(0.3, 0.7), rng.randf_range(0.3, 0.7))

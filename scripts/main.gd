@@ -129,6 +129,7 @@ var _last_f := Vector2.ZERO          # where the finger last was, in map coordin
 var _stroke_best := {}               # cell -> how near the finger has passed to its middle
 var _stroke_links := 0
 var _pinch_dist := 0.0
+var _tool_touch := false    # this touch began with a tool picked, so it must not pan
 var _pending := {}          # a finger that is down but not yet drawing: {pos}
 var _fling := Vector2.ZERO   # map glides on after a flick, in pixels per second
 var _pan_speed := Vector2.ZERO
@@ -411,8 +412,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_touches[event.index] = event.position
 			_fling = Vector2.ZERO
 			_pan_speed = Vector2.ZERO
-			if _touches.size() == 1 and tool != T.PAN and world.in_bounds(_cell_under(event.position)):
-				# Wait to see whether this is a tap, a drag, or the first of two fingers.
+			if _touches.size() == 1 and tool != T.PAN:
+				# With a tool picked, one finger only ever draws; it never moves
+				# the map. Wait to see whether this is a tap, a drag, or the
+				# first of two fingers.
+				_tool_touch = true
 				_pending = {"pos": event.position}
 			else:
 				_pending = {}
@@ -430,6 +434,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			elif _touches.is_empty() and _pan_speed.length() > 120.0:
 				_fling = _pan_speed
 			_painting = false
+			if _touches.is_empty():
+				_tool_touch = false
 			view.hover = Vector2i(-1, -1)
 	elif event is InputEventScreenDrag:
 		_touches[event.index] = event.position
@@ -450,7 +456,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_use_tool(event.position, false)
 		elif _painting:
 			_use_tool(event.position, false)
-		elif _touches.size() == 1:
+		elif _touches.size() == 1 and not _tool_touch:
 			_pan(event.relative)
 			var dt := maxf(get_process_delta_time(), 1.0 / 120.0)
 			_pan_speed = _pan_speed.lerp(event.relative / dt, 0.35)
@@ -613,8 +619,8 @@ func _draw_line_to(c: Vector2i, f: Vector2, first: bool) -> void:
 		var step := _last_cell + (c - _last_cell).sign()
 		var free := world.can_move_node(step)
 		if not _draw_link(_last_cell, step):
-			_painting = false
-			_end_stroke()
+			# Refused (the message says why): stay put so the finger can
+			# carry on round the obstacle from the last good spot.
 			return
 		if free:
 			_stroke_best[step] = 9.0

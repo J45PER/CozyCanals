@@ -9,7 +9,7 @@ const B := World.B
 
 const HW := 36.0      # half cell width on screen
 const HH := 18.0      # half cell height on screen
-const HSTEP := 26.0   # screen pixels per terrain level
+const HSTEP := 9.0    # screen pixels per terrain level: a low bank
 
 # Fields: pasture, meadow, wheat, cut hay, ploughed.
 const FIELD := [Color("9cbb6f"), Color("a9c47a"), Color("d6c27c"), Color("bfc883"), Color("b39672")]

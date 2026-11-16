@@ -137,6 +137,13 @@ func _run() -> void:
 	await _pick(T.CANAL)
 	_expect("toolbar tap builds nothing", world.version == before and main.tool == T.CANAL)
 
+	# With a tool picked, one finger never moves the map, even when the drag
+	# starts off the buildable land or runs into something it can't cross.
+	var held: Vector2 = main.view.position
+	await _drag([Vector2(40, 400), Vector2(200, 300), Vector2(400, 350)])
+	await _drag([_screen(world.places[0].cell), _screen(world.places[0].cell) + Vector2(120, 60)])
+	_expect("a picked tool never pans the map", main.view.position == held)
+
 	# With no tool picked, one finger moves the map; Fit brings it back.
 	await _tap_control(main._cat_buttons[main.category])
 	_expect("closing the category puts the tool down", main.tool == T.PAN and not main._sub_bar.visible)

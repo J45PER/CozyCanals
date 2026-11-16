@@ -24,7 +24,7 @@ line follows your finger. Only the land inside the white outline can be built on
 
 The build bar works like a city builder's: tap a category to open its tools,
 tap a tool to pick it, and tap it again (or close the category) to put it down.
-With no tool picked, one finger moves the map. Two fingers pan and pinch-zoom
+With a tool picked, one finger only ever draws and never moves the map; with no tool picked, one finger moves it. Two fingers pan and pinch-zoom
 at any time; the + / - / Fit buttons on the right zoom and bring the map back.
 
 | Category | Tools | Cost |

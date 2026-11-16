@@ -215,7 +215,7 @@ func node(c: Vector2i) -> Vector2:
 
 ## True if the cell has nothing on it yet, so a new line may place its node freely.
 func can_move_node(c: Vector2i) -> bool:
-	if not in_bounds(c) or building(c) != B.NONE or adj.has(c):
+	if not in_bounds(c) or building(c) != B.NONE or adj.has(c) or terrain_at(c) == T.RIVER:
 		return false
 	for p in portals:
 		if p.cell == c:

@@ -208,7 +208,6 @@ func set_world(wd: World) -> void:
 	_over.clear()
 	_build_apron()
 	_build_haze()
-	_build_corners()
 	_build_fields()
 	_build_ground()
 	_river_dirs.clear()
@@ -663,88 +662,21 @@ func bounds() -> Rect2:
 	return Rect2(-world.h * HW, top, (world.w + world.h) * HW, (world.w + world.h) * HH - top)
 
 
-# --- Height surface -----------------------------------------------------------
-# Each cell is four triangles meeting at its centre. The centre sits at the
-# cell's own level (where canals, locks and buildings stand); each corner is
-# the average of the cells around it, so levels join with slopes, not cliffs.
-
-func _build_corners() -> void:
-	_corner_z.clear()
-	_relief = FastNoiseLite.new()
-	_relief.seed = hash(world.title)
-	_relief.frequency = 0.12
-	for y in range(-APRON, world.h + APRON + 1):
-		for x in range(-APRON, world.w + APRON + 1):
-			var sum := 0.0
-			var apron := 0
-			for d: Vector2i in [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), Vector2i(0, 0)]:
-				var c := Vector2i(x, y) + d
-				var cc := Vector2i(clampi(c.x, -APRON, world.w + APRON - 1), clampi(c.y, -APRON, world.h + APRON - 1))
-				sum += _h(cc)
-				apron += int(not world.in_bounds(cc))
-			var z := sum / 4.0 * HSTEP
-			if apron == 4:
-				# Rolling country in the distance.
-				z += (_relief.get_noise_2d(x, y) * 0.5 + 0.5) * HSTEP * 1.4
-			_corner_z[Vector2i(x, y)] = z
-
-
-func _cz(corner: Vector2i) -> float:
-	return _corner_z.get(corner, 0.0)
-
-
-# Height at the middle of a cell: its own level on the map, smooth beyond it.
-func _centre_z(c: Vector2i) -> float:
-	if world.in_bounds(c):
-		return world.height(c) * HSTEP
-	return (_cz(c) + _cz(c + Vector2i(1, 0)) + _cz(c + Vector2i(0, 1)) + _cz(c + Vector2i(1, 1))) * 0.25
-
-
-# The four triangles of a cell: [[a, b], ...] corners in cell space, each
-# joined to the centre (0.5, 0.5).
-const FAN := [[Vector2(0, 0), Vector2(1, 0)], [Vector2(1, 0), Vector2(1, 1)],
-	[Vector2(1, 1), Vector2(0, 1)], [Vector2(0, 1), Vector2(0, 0)]]
-
-
-func _fan_index(u: float, v: float) -> int:
-	if v <= u and v <= 1.0 - u:
-		return 0
-	if u >= v and u >= 1.0 - v:
-		return 1
-	if v >= u and v >= 1.0 - u:
-		return 2
-	return 3
-
+# --- Ground levels ------------------------------------------------------------
+# The ground is flat, on up to three levels. A level change is a low grassy
+# bank with a dark crest line, and higher ground is a lighter green, so it is
+# easy to see where a canal will need a lock.
 
 ## Ground height (screen pixels) at a point in map coordinates.
 func ground_z(p: Vector2) -> float:
-	var c := Vector2i(floori(p.x), floori(p.y))
-	var l := p - Vector2(c)
-	var tri: Array = FAN[_fan_index(l.x, l.y)]
-	var a: Vector2 = tri[0]
-	var b: Vector2 = tri[1]
-	var m := Vector2(0.5, 0.5)
-	var w := _bary(l, a, b, m)
-	return w.x * _cz(c + Vector2i(a)) + w.y * _cz(c + Vector2i(b)) + w.z * _centre_z(c)
+	return _h(Vector2i(floori(p.x), floori(p.y))) * HSTEP
 
 
-static func _bary(p: Vector2, a: Vector2, b: Vector2, c: Vector2) -> Vector3:
-	var v0 := b - a
-	var v1 := c - a
-	var v2 := p - a
-	var den := v0.x * v1.y - v1.x * v0.y
-	if absf(den) < 1e-6:
-		return Vector3(1, 0, 0)
-	var v := (v2.x * v1.y - v1.x * v2.y) / den
-	var w := (v0.x * v2.y - v2.x * v0.y) / den
-	return Vector3(1.0 - v - w, v, w)
-
-
-## Map coordinates under a view-local point, following the ground's height.
+## Map coordinates under a view-local point, allowing for the ground's level.
 func map_at(local: Vector2) -> Vector2:
 	var z := 0.0
 	var m := Vector2.ZERO
-	for i in 6:
+	for i in 4:
 		var a := local.x / HW
 		var b := (local.y + z) / HH
 		m = Vector2((a + b) * 0.5, (b - a) * 0.5)
@@ -752,81 +684,22 @@ func map_at(local: Vector2) -> Vector2:
 	return m
 
 
-# Light falls from the upper left; slopes facing it are brighter. Shading is
-# worked out at each corner and centre and blended, so hills look smooth.
-const LIGHT := Vector3(-0.55, -0.35, 0.76)
-
-
-func _light(dzdx: float, dzdy: float) -> float:
-	var s := 1.0 / (2.0 * HH)   # pixels of height per cell -> slope
-	var n := Vector3(-dzdx * s, -dzdy * s, 1.0).normalized()
-	return 1.0 + (n.dot(LIGHT) - LIGHT.z) * 1.1
-
-
-func _corner_light(k: Vector2i) -> float:
-	return _light((_cz(k + Vector2i(1, 0)) - _cz(k - Vector2i(1, 0))) * 0.5,
-		(_cz(k + Vector2i(0, 1)) - _cz(k - Vector2i(0, 1))) * 0.5)
-
-
-func _centre_light(c: Vector2i) -> float:
-	var z00 := _cz(c)
-	var z10 := _cz(c + Vector2i(1, 0))
-	var z01 := _cz(c + Vector2i(0, 1))
-	var z11 := _cz(c + Vector2i(1, 1))
-	return _light((z10 + z11 - z00 - z01) * 0.5, (z01 + z11 - z00 - z10) * 0.5)
-
-
-static func _lit(col: Color, light: float) -> Color:
-	return Color(col.r * light, col.g * light, col.b * light, col.a)
-
-
-# Cuts each field piece of each cell into the cell's four triangles, so every
-# piece lies on one triangle, then gives each point its height and light.
+# Each cell's field pieces as screen polygons, tinted by level.
 func _build_ground() -> void:
 	_ground.clear()
-	var m := Vector2(0.5, 0.5)
-	var corner_light := {}
-	for k in _corner_z:
-		corner_light[k] = _corner_light(k)
 	for y in range(-APRON, world.h + APRON):
 		for x in range(-APRON, world.w + APRON):
 			var c := Vector2i(x, y)
 			if _hidden(c):
 				continue
-			var o := Vector2(c)
+			var z := _zc(c)
+			var lift := 0.13 * _h(c)
 			var pieces := []
-			var zm := _centre_z(c)
-			var lm := _centre_light(c)
-			var lift := 0.03 * zm / HSTEP
-			for tri: Array in FAN:
-				var a: Vector2 = tri[0]
-				var b: Vector2 = tri[1]
-				var za := _cz(c + Vector2i(a))
-				var zb := _cz(c + Vector2i(b))
-				var la: float = corner_light.get(c + Vector2i(a), 1.0)
-				var lb: float = corner_light.get(c + Vector2i(b), 1.0)
-				for entry in _field_polys[c]:
-					var poly: PackedVector2Array = entry[0]
-					for edge in [[a, b, m], [b, m, a], [m, a, b]]:
-						var p: Vector2 = o + edge[0]
-						var q: Vector2 = o + edge[1]
-						var r: Vector2 = o + edge[2]
-						var nrm := (q - p).orthogonal()
-						if (r - p).dot(nrm) > 0.0:
-							nrm = -nrm
-						poly = _clip(poly, p, nrm)
-						if poly.size() < 3:
-							break
-					if poly.size() < 3:
-						continue
-					var col: Color = (_fields[entry[1]].col as Color).lightened(lift)
-					var pts := PackedVector2Array()
-					var cols := PackedColorArray()
-					for q: Vector2 in poly:
-						var w := _bary(q - o, a, b, m)
-						pts.append(Art.iso(q, w.x * za + w.y * zb + w.z * zm))
-						cols.append(_lit(col, w.x * la + w.y * lb + w.z * lm))
-					pieces.append([pts, cols])
+			for entry in _field_polys[c]:
+				var pts := PackedVector2Array()
+				for q: Vector2 in entry[0]:
+					pts.append(Art.iso(q, z))
+				pieces.append([pts, (_fields[entry[1]].col as Color).lightened(lift)])
 			_ground[c] = pieces
 
 
@@ -957,8 +830,31 @@ func _emit_terrain(c: Vector2i, mb: Art.MB) -> void:
 	var z := _zc(c)
 	var o := Vector2(c)
 	var fade := _fade(c)
+	# Banks down to lower ground in front.
+	for side in 2:
+		var n := c + (Vector2i(0, 1) if side == 0 else Vector2i(1, 0))
+		if not _in_range(n) or _hidden(n) or _zc(n) >= z:
+			continue
+		var a := o + (Vector2(0, 1) if side == 0 else Vector2(1, 0))
+		var b := o + Vector2(1, 1)
+		mb.quad(Art.iso(a, z), Art.iso(b, z), Art.iso(b, _zc(n)), Art.iso(a, _zc(n)),
+			Color("a3966a") if side == 0 else Color("b7aa7c"))
 	for piece in _ground.get(c, []):
-		mb.fan_shaded(piece[0], piece[1])
+		mb.fan(piece[0], piece[1])
+	# A crest line and short hatching wherever the ground drops away, on every
+	# side, so level changes read from any direction.
+	for d in World.DIRS4:
+		var n := c + d
+		if not _in_range(n) or _hidden(n) or _h(n) >= _h(c):
+			continue
+		var mid := o + Vector2(0.5, 0.5) + Vector2(d) * 0.5
+		var along := Vector2(-d.y, d.x) * 0.5
+		mb.line(Art.iso(mid - along, z + 0.3), Art.iso(mid + along, z + 0.3), 2.4, Color("85784f"))
+		if d.x + d.y < 0:
+			# Far-side drops have no visible bank, so hatch down the slope.
+			for k: float in [-0.3, 0.0, 0.3]:
+				var top := mid + along * 2.0 * k
+				mb.line(Art.iso(top, z), Art.iso(top + Vector2(d) * 0.16, _zc(n)), 1.4, Color("85784f"))
 	if not _busy(c):
 		Art.field_detail(mb, o, ground_z, _fields[_cell_field[c]], fade)
 	if world.in_bounds(c) and world.building(c) != B.NONE:
@@ -967,6 +863,14 @@ func _emit_terrain(c: Vector2i, mb: Art.MB) -> void:
 	var river: Array = _river_dirs.get(c, [])
 	if _cont.has(c) and _cont[c][0] == "river":
 		river = _cont[c][1]
+	if world.in_bounds(c) and world.has_canal(c):
+		# Where the river has been made into canal, the canal replaces it;
+		# only stretches of river leading elsewhere are still drawn.
+		var rest := []
+		for d: Vector2 in river:
+			if world.link(c, c + Vector2i(d)) != L.CANAL:
+				rest.append(d)
+		river = rest
 	if not river.is_empty():
 		_stroke(mb, c, river, 0.36, Art.hazed(Art.RIVER_BANK, fade), true, true)
 		_stroke(mb, c, river, 0.29, Art.hazed(Art.RIVER_EDGE, fade), true, true)
@@ -1020,12 +924,9 @@ func _mid_z(c: Vector2i, d: Vector2, ramp: bool) -> float:
 	return _zc(c)
 
 
-# Where the lines through a cell meet. Rivers wander on their own course.
-func _node(c: Vector2i, river := false) -> Vector2:
-	if river:
-		if _river_dirs.has(c):
-			return Vector2(c) + Vector2(0.3 + 0.4 * Art.rnd(c.x, c.y, 301), 0.3 + 0.4 * Art.rnd(c.x, c.y, 302))
-		return Vector2(c) + Vector2(0.5, 0.5)
+# Where the lines through a cell meet. Rivers, canals, paths and roads in the
+# same cell all share it.
+func _node(c: Vector2i, _river := false) -> Vector2:
 	return world.node(c) if world.inside(c) else Vector2(c) + Vector2(0.5, 0.5)
 
 
