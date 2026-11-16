@@ -119,7 +119,7 @@ func _environment() -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color("e9efe0")
 	env.ambient_light_energy = 0.55
-	env.fog_enabled = true
+	env.fog_enabled = false
 	env.fog_light_color = MIST
 	env.fog_density = 0.006
 	var we := WorldEnvironment.new()
@@ -173,13 +173,34 @@ func _ground() -> void:
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(world.w + 2 * MARGIN, world.h + 2 * MARGIN)
 	plane.mesh = pm
-	var m := _mat(Color.WHITE)
-	m.albedo_texture = ImageTexture.create_from_image(img)
-	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	var sh := Shader.new()
+	sh.code = """shader_type spatial;
+uniform sampler2D tex : source_color, filter_linear_mipmap;
+uniform vec4 mist : source_color;
+uniform vec2 lo;
+uniform vec2 hi;
+uniform float fade_in;
+uniform float fade_out;
+varying vec3 wp;
+void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
+void fragment() {
+	vec2 q = max(max(lo - wp.xz, wp.xz - hi), vec2(0.0));
+	float d = max(q.x, q.y);
+	ALBEDO = mix(texture(tex, UV).rgb, mist.rgb, smoothstep(fade_in, fade_out, d));
+	ROUGHNESS = 1.0;
+	SPECULAR = 0.0;
+}"""
+	var m := ShaderMaterial.new()
+	m.shader = sh
+	m.set_shader_parameter("tex", ImageTexture.create_from_image(img))
+	m.set_shader_parameter("mist", MIST * 0.78)
+	m.set_shader_parameter("lo", Vector2(0, 0))
+	m.set_shader_parameter("hi", Vector2(world.w, world.h))
+	m.set_shader_parameter("fade_in", 1.5)
+	m.set_shader_parameter("fade_out", float(MARGIN) - 1.0)
 	plane.material_override = m
 	plane.position = Vector3(world.w * 0.5, 0, world.h * 0.5)
 	scene.add_child(plane)
-	# Receives the sun's shadows; the texture plane stays the visible ground.
 
 
 # --- Ribbons along splines ---------------------------------------------------------
@@ -246,28 +267,24 @@ func _spline(pts: Array[Vector2], n := 6) -> Array[Vector2]:
 	return out
 
 
-func _ribbon(pts: Array[Vector2], half: float, y: float, col: Color) -> void:
-	if pts.size() < 2:
-		return
-	var verts := PackedVector3Array()
-	var cs := PackedColorArray()
-	var idx := PackedInt32Array()
-	for i in pts.size():
-		var t := pts[mini(i + 1, pts.size() - 1)] - pts[maxi(i - 1, 0)]
-		if t.length() < 0.0001:
-			t = Vector2(1, 0)
-		var n := Vector2(-t.y, t.x).normalized() * half
-		verts.append(Vector3(pts[i].x + n.x, y, pts[i].y + n.y))
-		verts.append(Vector3(pts[i].x - n.x, y, pts[i].y - n.y))
-		cs.append(col)
-		cs.append(col)
-		if i > 0:
-			var b := (i - 1) * 2
-			idx.append_array([b, b + 2, b + 1, b + 1, b + 2, b + 3])
+func _outside(p: Vector2) -> float:
+	var q := Vector2(maxf(maxf(-p.x, p.x - world.w), 0.0), maxf(maxf(-p.y, p.y - world.h), 0.0))
+	return maxf(q.x, q.y)
+
+
+func _tint(p: Vector2, col: Color) -> Color:
+	return col.lerp(MIST, smoothstep(1.5, MARGIN - 1.0, _outside(p)))
+
+
+func _flat_mesh(verts: PackedVector3Array, cs: PackedColorArray, idx: PackedInt32Array) -> void:
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_COLOR] = cs
+	var nrm := PackedVector3Array()
+	nrm.resize(verts.size())
+	nrm.fill(Vector3.UP)
+	arrays[Mesh.ARRAY_NORMAL] = nrm
 	arrays[Mesh.ARRAY_INDEX] = idx
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
@@ -275,9 +292,53 @@ func _ribbon(pts: Array[Vector2], half: float, y: float, col: Color) -> void:
 	mi.mesh = mesh
 	var m := _mat(Color.WHITE)
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.metallic_specular = 0.0
 	mi.material_override = m
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	scene.add_child(mi)
+
+
+# A ribbon along pts. fa/fb tint the first/last couple of cells, so a canal can
+# melt into the river it joins.
+func _ribbon(pts: Array[Vector2], half: float, y: float, col: Color, fa := Color(0, 0, 0, 0), fb := Color(0, 0, 0, 0)) -> void:
+	if pts.size() < 2:
+		return
+	var verts := PackedVector3Array()
+	var cs := PackedColorArray()
+	var idx := PackedInt32Array()
+	var n := pts.size()
+	for i in n:
+		var t := pts[mini(i + 1, n - 1)] - pts[maxi(i - 1, 0)]
+		if t.length() < 0.0001:
+			t = Vector2(1, 0)
+		var nrm := Vector2(-t.y, t.x).normalized() * half
+		var c := col
+		if fa.a > 0.0:
+			c = c.lerp(fa, clampf(1.0 - float(i) / 12.0, 0.0, 1.0))
+		if fb.a > 0.0:
+			c = c.lerp(fb, clampf(1.0 - float(n - 1 - i) / 12.0, 0.0, 1.0))
+		var lc := _tint(pts[i], c)
+		verts.append(Vector3(pts[i].x + nrm.x, y, pts[i].y + nrm.y))
+		verts.append(Vector3(pts[i].x - nrm.x, y, pts[i].y - nrm.y))
+		cs.append(lc)
+		cs.append(lc)
+		if i > 0:
+			var b := (i - 1) * 2
+			idx.append_array([b, b + 2, b + 1, b + 1, b + 2, b + 3])
+	_flat_mesh(verts, cs, idx)
+
+
+# A round patch: closes the joint where ribbons meet, and rounds off dead ends.
+func _disc(p: Vector2, r: float, y: float, col: Color) -> void:
+	var verts := PackedVector3Array([Vector3(p.x, y, p.y)])
+	var cs := PackedColorArray([_tint(p, col)])
+	var idx := PackedInt32Array()
+	for k in 16:
+		var a := TAU * k / 16.0
+		verts.append(Vector3(p.x + cos(a) * r, y, p.y + sin(a) * r))
+		cs.append(_tint(p, col))
+		idx.append_array([0, 1 + k, 1 + (k + 1) % 16])
+	_flat_mesh(verts, cs, idx)
 
 
 func _extend(pts: Array[Vector2], cell_a: Vector2i, cell_b: Vector2i) -> Array[Vector2]:
@@ -309,29 +370,81 @@ func _chain_points(chain: Array[Vector2i]) -> Array[Vector2]:
 	return _spline(_extend(pts, chain[0], chain[chain.size() - 1]))
 
 
+func _river_cells() -> Dictionary:
+	var d := {}
+	for course in world.rivers:
+		for c in course:
+			d[c] = true
+	return d
+
+
 func _waterways() -> void:
-	# Rivers: wide and light.
+	var rc := _river_cells()
+	var rivers: Array = []
 	for course in world.rivers:
 		var cells: Array[Vector2i] = []
 		cells.assign(course)
-		var pts := _chain_points(cells)
-		_ribbon(pts, 0.40, 0.004, Art.RIVER_BANK)
-		_ribbon(pts, 0.35, 0.008, Art.RIVER)
-	# Canals: narrower, darker, with a towpath and coping.
+		rivers.append(_chain_points(cells))
+	var canals: Array = []
 	for chain in _chains([L.CANAL]):
-		var pts := _chain_points(chain)
-		_ribbon(pts, 0.34, 0.006, Color("cfc3a6"))
-		_ribbon(pts, 0.27, 0.010, Color("9a6a55") if world.is_old(chain[0], chain[1]) else Color("e2dccb"))
-		_ribbon(pts, 0.20, 0.014, Art.WATER)
+		canals.append({"pts": _chain_points(chain), "chain": chain, "old": world.is_old(chain[0], chain[1])})
+	var derelict: Array = []
 	for chain in _chains([L.DERELICT]):
-		var pts := _chain_points(chain)
-		_ribbon(pts, 0.27, 0.006, Color("857a5c"))
-		_ribbon(pts, 0.2, 0.010, Art.MURK)
+		derelict.append(_chain_points(chain))
+	# Layer 1: banks, copings and brickwork.
+	for pts: Array[Vector2] in rivers:
+		_ribbon(pts, 0.42, 0.010, Art.RIVER_BANK)
+	for c in canals:
+		_ribbon(c.pts, 0.34, 0.012, Color("cfc3a6"))
+		_ribbon(c.pts, 0.27, 0.014, Color("9a6a55") if c.old else Color("e2dccb"))
+		_disc(c.pts[0], 0.34, 0.013, Color("cfc3a6"))
+		_disc(c.pts[c.pts.size() - 1], 0.34, 0.013, Color("cfc3a6"))
+	for pts: Array[Vector2] in derelict:
+		_ribbon(pts, 0.27, 0.012, Color("857a5c"))
+		_ribbon(pts, 0.2, 0.014, Art.MURK)
+	# Layer 2: water on top, rivers first so a canal's water flows over them.
+	for pts: Array[Vector2] in rivers:
+		_ribbon(pts, 0.36, 0.030, Art.RIVER)
+	for c in canals:
+		var chain: Array = c.chain
+		var fa := Art.RIVER if rc.has(chain[0]) else Color(0, 0, 0, 0)
+		var fb := Art.RIVER if rc.has(chain[chain.size() - 1]) else Color(0, 0, 0, 0)
+		_ribbon(c.pts, 0.21, 0.034, Art.WATER, fa, fb)
+		_disc(c.pts[0], 0.21, 0.036, Art.RIVER if rc.has(chain[0]) else Art.WATER)
+		_disc(c.pts[c.pts.size() - 1], 0.21, 0.036, Art.RIVER if rc.has(chain[chain.size() - 1]) else Art.WATER)
+
+
+func _road_style(chain: Array) -> String:
+	var t := world.link(chain[0], chain[1])
+	return world.link_style.get(world.key(chain[0], chain[1]), "lane" if t == L.ROAD else "gravel")
+
+
+func _road_ribbons(pts: Array[Vector2], style_name: String, caps := true) -> void:
+	var st: Array = ROAD_STYLE[style_name]
+	_ribbon(pts, st[0], 0.050, st[2])
+	_ribbon(pts, st[1], 0.054, st[3])
+	if caps:
+		_disc(pts[0], st[0], 0.052, st[2])
+		_disc(pts[pts.size() - 1], st[0], 0.052, st[2])
+		_disc(pts[0], st[1], 0.058, st[3])
+		_disc(pts[pts.size() - 1], st[1], 0.058, st[3])
+	if style_name == "carriageway":
+		for i in range(0, pts.size() - 1, 2):
+			if (i / 2) % 2 == 0:
+				_ribbon([pts[i], pts[i + 1]] as Array[Vector2], 0.012, 0.058, Color("f1ece0"))
+
+
+var _deg := {}
 
 
 func _roads() -> void:
+	var run_ends: Array[Vector2] = []
+	_deg.clear()
+	for k in world.links:
+		if world.links[k] in [L.ROAD, L.PATH]:
+			for c in world.key_cells(k):
+				_deg[c] = int(_deg.get(c, 0)) + 1
 	for chain in _chains([L.ROAD, L.PATH]):
-		# Leave out cells under bridges; the bridge carries the road there.
 		var runs: Array = [[]]
 		for c in chain:
 			if view._bridge_of.has(c):
@@ -339,35 +452,31 @@ func _roads() -> void:
 					runs.append([])
 			else:
 				(runs[runs.size() - 1] as Array).append(c)
-		var style_name: String = "lane"
-		var t := world.link(chain[0], chain[1])
-		style_name = world.link_style.get(world.key(chain[0], chain[1]), "lane" if t == L.ROAD else "gravel")
-		var st: Array = ROAD_STYLE[style_name]
+		var style_name := _road_style(chain)
 		for run in runs:
 			if run.size() < 2:
 				continue
 			var cells: Array[Vector2i] = []
 			cells.assign(run)
-			var pts := _chain_points(cells)
-			_ribbon(pts, st[0], 0.016, st[2])
-			_ribbon(pts, st[1], 0.020, st[3])
-			if style_name == "carriageway":
-				var dash: Array[Vector2] = []
-				for i in pts.size():
-					dash.append(pts[i])
-					if dash.size() == 2:
-						if (i / 2) % 2 == 0:
-							_ribbon(dash, 0.012, 0.024, Color("f1ece0"))
-						dash = [pts[i]]
-	# The approaches to each bridge.
+			var rp := _chain_points(cells)
+			_road_ribbons(rp, style_name, int(_deg.get(cells[0], 0)) == 1 and int(_deg.get(cells[cells.size() - 1], 0)) == 1)
+			run_ends.append(rp[0])
+			run_ends.append(rp[rp.size() - 1])
 	for br in view._bridges:
-		var st: Array = ROAD_STYLE[br.line_style]
+		for e: Vector2 in [br.a, br.b]:
+			var best := Vector2.INF
+			for q in run_ends:
+				if q.distance_to(e) < 1.6 and (best == Vector2.INF or q.distance_to(e) < best.distance_to(e)):
+					best = q
+			if best != Vector2.INF:
+				var mid := best.lerp(e, 0.5)
+				_road_ribbons(_spline([best, mid, e] as Array[Vector2], 4), br.line_style, false)
 		for app in [br.app1, br.app2]:
 			var pts: Array[Vector2] = []
 			for q: Vector2 in app:
 				pts.append(q)
-			_ribbon(pts, st[0], 0.016, st[2])
-			_ribbon(pts, st[1], 0.020, st[3])
+			if pts.size() >= 2:
+				_road_ribbons(pts, br.line_style, false)
 
 
 # A bridge swept along its deck: arch or beam, with an open space under it.
@@ -404,8 +513,8 @@ func _bridge(br: Dictionary) -> void:
 		var h0: float = deck_h.call(i)
 		var h1: float = deck_h.call(i + 1)
 		# Deck.
-		add_quad.call(Vector3(p0.x - side.x, h0 + 0.02, p0.y - side.y), Vector3(p0.x + side.x, h0 + 0.02, p0.y + side.y),
-			Vector3(p1.x + side.x, h1 + 0.02, p1.y + side.y), Vector3(p1.x - side.x, h1 + 0.02, p1.y - side.y), Color("7f7d79"))
+		add_quad.call(Vector3(p0.x - side.x, h0 + 0.06, p0.y - side.y), Vector3(p0.x + side.x, h0 + 0.06, p0.y + side.y),
+			Vector3(p1.x + side.x, h1 + 0.06, p1.y + side.y), Vector3(p1.x - side.x, h1 + 0.06, p1.y - side.y), Color("7f7d79"))
 		for sd: float in [-1.0, 1.0]:
 			var q0 := p0 + side * sd
 			var q1 := p1 + side * sd
@@ -449,7 +558,9 @@ func _mesh_node(mesh: Mesh, col: Color, pos: Vector3, rot_y := 0.0) -> MeshInsta
 	return mi
 
 
-func _house(pos: Vector2, size: Vector3, wall: Color, roof: Color, rot: float, ridge := 0.34) -> void:
+func _house(pos: Vector2, size_in: Vector3, wall: Color, roof: Color, rot: float, ridge_in := 0.34) -> void:
+	var size := size_in * 1.35
+	var ridge := ridge_in * 1.35
 	var box := BoxMesh.new()
 	box.size = size
 	_mesh_node(box, wall, Vector3(pos.x, size.y * 0.5, pos.y), rot)
@@ -467,6 +578,11 @@ func _house(pos: Vector2, size: Vector3, wall: Color, roof: Color, rot: float, r
 func _buildings() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7
+	var access: Array[Vector2] = []
+	for k in world.links:
+		if world.links[k] in [L.ROAD, L.PATH]:
+			for c in world.key_cells(k):
+				access.append(world.node(c))
 	for y in world.h:
 		for x in world.w:
 			var c := Vector2i(x, y)
@@ -475,6 +591,13 @@ func _buildings() -> void:
 				continue
 			var p := Vector2(x + 0.5, y + 0.5)
 			var rot := rng.randi_range(0, 3) * PI * 0.5
+			var near := Vector2.INF
+			for q in access:
+				if near == Vector2.INF or q.distance_to(p) < near.distance_to(p):
+					near = q
+			if near != Vector2.INF and near.distance_to(p) < 3.5:
+				var mid := p.lerp(near, 0.5) + Vector2(-(near - p).y, (near - p).x).normalized() * 0.08
+				_ribbon(_spline([p, mid, near] as Array[Vector2], 5), 0.045, 0.040, Color("d8c79a"))
 			var plot := BoxMesh.new()
 			plot.size = Vector3(0.9, 0.012, 0.9)
 			_mesh_node(plot, Color("a9c97b") if kind != B.FARM else Color("cfc39f"), Vector3(p.x, 0.012, p.y))
