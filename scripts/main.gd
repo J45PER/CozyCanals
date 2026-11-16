@@ -363,18 +363,16 @@ func _clamp_view() -> void:
 		return
 	var mid := _fit_rect().get_center()
 	var local := (mid - view.position) / view.scale.x
-	var a := local.x / WorldView.HW
-	var b := local.y / WorldView.HH
-	var m := Vector2((a + b) * 0.5, (b - a) * 0.5)
+	var m := Vector2(local.x / WorldView.HW, local.y / WorldView.HH)
 	# The further out the zoom, the closer to the middle the view is held, so
 	# the screen is always mostly playable map.
 	var area := _fit_rect().size
-	var reach := minf(area.x / (2.0 * view.scale.x * WorldView.HW), area.y / (2.0 * view.scale.y * WorldView.HH)) * 0.45
+	var reach := minf(area.x / (view.scale.x * WorldView.HW), area.y / (view.scale.y * WorldView.HH)) * 0.45
 	var lo := Vector2(minf(reach, world.w * 0.5), minf(reach, world.h * 0.5))
 	var held := m.clamp(lo, Vector2(world.w, world.h) - lo)
 	if held == m:
 		return
-	var back := Vector2((held.x - held.y) * WorldView.HW, (held.x + held.y) * WorldView.HH)
+	var back := Vector2(held.x * WorldView.HW, held.y * WorldView.HH)
 	view.position = mid - back * view.scale.x
 	_fling = Vector2.ZERO
 
@@ -789,6 +787,7 @@ func _select_tool(id: int) -> void:
 	tool = id
 	view.hover = Vector2i(-1, -1)
 	view.show_derelict = tool == T.RESTORE
+	view.show_grid = tool != T.PAN
 	for b in _tool_buttons:
 		b.set_pressed_no_signal(b.tool_id == id)
 	if TOOL_HINTS.has(id) and mode != "menu":

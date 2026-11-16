@@ -1,5 +1,5 @@
 extends Node2D
-## Draws a World in isometric projection.
+## Draws a World front-on: x runs across the screen, y runs down it.
 ##
 ## The map is surrounded by an apron of countryside that is not part of the
 ## game: fields, hedges and trees fading into haze, with the canals, roads and
@@ -8,7 +8,7 @@ extends Node2D
 ## Drawing happens in two passes so standing things are never cut off:
 ##   1. everything flat (ground, water, paths, roads), for the whole map;
 ##   2. standing things (hedges, trees, buildings, bridges, locks, boats),
-##      one diagonal row at a time from back to front. Raised ground is drawn
+##      one row at a time from back to front. Raised ground is drawn
 ##      again in this pass so a hill still hides what is behind it.
 ## Each row's geometry is baked into meshes and only rebuilt when it changes.
 
@@ -71,6 +71,7 @@ var world: World
 var hover := Vector2i(-1, -1)
 var hover_ok := true
 var show_labels := true
+var show_grid := false         # faint cell grid while a building tool is held, to judge alignment
 var show_derelict := false     # highlight silted canal (while restoring)
 
 var _t := 0.0
@@ -136,23 +137,23 @@ func _ready() -> void:
 # --- Cells and rows -----------------------------------------------------------
 
 func _rows() -> int:
-	return world.w + world.h + 4 * APRON - 1
+	return world.h + 2 * APRON
 
 
 func _ri(c: Vector2i) -> int:
-	return c.x + c.y + 2 * APRON
+	return c.y + APRON
 
 
 func _in_range(c: Vector2i) -> bool:
 	return c.x >= -APRON and c.y >= -APRON and c.x < world.w + APRON and c.y < world.h + APRON
 
 
-## All cells (land and apron) on diagonal row `r`.
+## All cells (land and apron) on row `r`.
 func _row(r: int) -> Array[Vector2i]:
-	var d := r - 2 * APRON
+	var y := r - APRON
 	var out: Array[Vector2i] = []
-	for x in range(maxi(-APRON, d - (world.h + APRON - 1)), mini(world.w + APRON, d + APRON + 1)):
-		out.append(Vector2i(x, d - x))
+	for x in range(-APRON, world.w + APRON):
+		out.append(Vector2i(x, y))
 	return out
 
 
@@ -694,7 +695,7 @@ func cell_at(p: Vector2) -> Vector2i:
 ## The playable land, in view-local coordinates.
 func bounds() -> Rect2:
 	var top := -world.max_height * HSTEP - 50.0
-	return Rect2(-world.h * HW, top, (world.w + world.h) * HW, (world.w + world.h) * HH - top)
+	return Rect2(0.0, top, world.w * HW, world.h * HH - top)
 
 
 # --- Ground levels ------------------------------------------------------------
@@ -712,9 +713,7 @@ func map_at(local: Vector2) -> Vector2:
 	var z := 0.0
 	var m := Vector2.ZERO
 	for i in 4:
-		var a := local.x / HW
-		var b := (local.y + z) / HH
-		m = Vector2((a + b) * 0.5, (b - a) * 0.5)
+		m = Vector2(local.x / HW, (local.y + z) / HH)
 		z = ground_z(m)
 	return m
 
@@ -885,7 +884,7 @@ func _emit_terrain(c: Vector2i, mb: Art.MB) -> void:
 		var mid := o + Vector2(0.5, 0.5) + Vector2(d) * 0.5
 		var along := Vector2(-d.y, d.x) * 0.5
 		mb.line(Art.iso(mid - along, z + 0.3), Art.iso(mid + along, z + 0.3), 2.4, Color("85784f"))
-		if d.x + d.y < 0:
+		if d.y < 0:
 			# Far-side drops have no visible bank, so hatch down the slope.
 			for k: float in [-0.3, 0.0, 0.3]:
 				var top := mid + along * 2.0 * k
@@ -981,7 +980,7 @@ func _stroke(mb: Art.MB, c: Vector2i, dirs: Array, hw: float, col: Color, ramp: 
 	if dirs.size() <= 1:
 		var tone := alt if (not flags.is_empty() and flags[0]) else col
 		var zn := ground_z(node) + 0.6 if ramp else z
-		mb.disc(Art.iso(node, zn), hw * 1.414 * HW, hw * 1.414 * HH, tone, 18)
+		mb.disc(Art.iso(node, zn), hw * HW, hw * HH, tone, 18)
 		if dirs.size() == 1:
 			var d: Vector2 = dirs[0]
 			var zm := _mid_z(c, d, ramp)
@@ -1147,7 +1146,7 @@ func _emit_water(c: Vector2i, mb: Art.MB, z: float) -> void:
 		for piece in pieces:
 			_wband(mb, piece[0], piece[1], piece[2], piece[3], piece[4], layer, z)
 		if not disc.is_empty():
-			var r: float = (disc.w + (disc.x if layer == "rim" else 0.0)) * 1.414
+			var r: float = (disc.w + (disc.x if layer == "rim" else 0.0))
 			mb.disc(Art.iso(node, z), r * HW, r * HH, disc.cr if layer == "rim" else disc.cw, 20)
 
 
@@ -1274,7 +1273,7 @@ func _emit_land_lines(c: Vector2i, mb: Art.MB) -> void:
 				var j := _join(c, Vector2i(line[0]))
 				_band(mb, j, (j + node) * 0.5, node, -hw, hw, z, z, z, st.edge_col if layer == "edge" else st.col, true)
 			var top: Dictionary = LINE_STYLE[lines[0][1]]
-			var r: float = top[layer] * 1.414
+			var r: float = top[layer]
 			mb.disc(Art.iso(node, z), r * HW, r * HH, top.edge_col if layer == "edge" else top.col, 18)
 	# Markings and the grass strip down the middle of a dirt track.
 	for line in lines:
@@ -1397,7 +1396,7 @@ func _emit_moorings(c: Vector2i, mb: Art.MB, sprites: Array) -> void:
 	var name := Sprites.boat((c.x * 7 + c.y) % maxi(Sprites.boat_liveries, 1), heading)
 	var at := node + side * 0.11
 	if Sprites.has(name):
-		sprites.append([Sprites.texture(name), Sprites.rect(name, Art.iso(at, z - 1.0), BOAT_SCALE), at.x + at.y, Color.WHITE])
+		sprites.append([Sprites.texture(name), Sprites.rect(name, Art.iso(at, z - 1.0), BOAT_SCALE), at.y, Color.WHITE])
 
 
 # --- Building plots -----------------------------------------------------------
@@ -1607,8 +1606,8 @@ func _car_shape(p: Vector2, dir: Vector2, z: float, col: Color) -> Array:
 			var a := ring[i]
 			var b := ring[(i + 1) % 4]
 			var mid := (a + b) * 0.5 - p
-			if mid.x + mid.y > 0.0:   # faces turned towards the camera
-				faces.append([a.x + a.y + b.x + b.y, a, b])
+			if mid.y > 0.0:   # faces turned towards the camera
+				faces.append([a.y + b.y, a, b])
 		faces.sort_custom(func(m, n): return m[0] < n[0])
 		var c: Color = part[4]
 		for f in faces:
@@ -1638,7 +1637,7 @@ func _put(sprites: Array, name: String, p: Vector2, z: float, fade := 0.0, flip 
 			# Mirror about the anchor: a negative width flips the image.
 			# Godot keeps the rect where it is and flips the image inside it.
 			r = Rect2(at.x - (r.size.x - (at.x - r.position.x)), r.position.y, -r.size.x, r.size.y)
-		sprites.append([Sprites.texture(name), r, p.x + p.y, tint])
+		sprites.append([Sprites.texture(name), r, p.y, tint])
 
 
 func _emit_standing(c: Vector2i, mb: Art.MB, sprites: Array, smoke: Array) -> void:
@@ -1737,7 +1736,7 @@ func _emit_scenery(c: Vector2i, mine: Array, fade: float) -> void:
 func _label_anchor(p: Dictionary) -> Vector2:
 	var d := Vector2(p.dir)
 	var side := Vector2(-d.y, d.x) * 0.42
-	if side.x + side.y > 0.0:
+	if side.y > 0.0:
 		side = -side
 	return Vector2(p.cell) + Vector2(0.5, 0.5) + side + d * 0.2
 
@@ -2112,6 +2111,25 @@ func _plaque(ci: CanvasItem, pos: Vector2, text: String, size: int, bg: Color, i
 
 
 func _draw_overlays(ci: CanvasItem) -> void:
+	if show_grid:
+		var lines := PackedVector2Array()
+		for y in world.h:
+			for x in world.w:
+				var c := Vector2i(x, y)
+				if not world.in_bounds(c):
+					continue
+				var o := Vector2(c)
+				lines.append(Art.iso(o, 0.0))
+				lines.append(Art.iso(o + Vector2(1, 0), 0.0))
+				lines.append(Art.iso(o, 0.0))
+				lines.append(Art.iso(o + Vector2(0, 1), 0.0))
+				if not world.in_bounds(c + Vector2i(1, 0)):
+					lines.append(Art.iso(o + Vector2(1, 0), 0.0))
+					lines.append(Art.iso(o + Vector2(1, 1), 0.0))
+				if not world.in_bounds(c + Vector2i(0, 1)):
+					lines.append(Art.iso(o + Vector2(0, 1), 0.0))
+					lines.append(Art.iso(o + Vector2(1, 1), 0.0))
+		ci.draw_multiline(lines, Color(1, 1, 1, 0.34), 1.5)
 	if show_derelict:
 		# Silted canal glows so it is easy to find and tap.
 		var a := 0.45 + 0.25 * sin(_t * 4.0)

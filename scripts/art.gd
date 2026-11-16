@@ -7,8 +7,8 @@ extends RefCounted
 const World := preload("res://scripts/world.gd")
 const B := World.B
 
-const HW := 36.0      # half cell width on screen
-const HH := 27.0      # half cell height on screen (higher = more top-down)
+const HW := 64.0      # cell width on screen (the view is front-on: x runs across, y down)
+const HH := 48.0      # cell height on screen (HH / HW sets the camera pitch: higher = more top-down)
 const HSTEP := 9.0    # screen pixels per terrain level: a low bank
 
 # Fields: pasture, meadow, wheat, cut hay, ploughed.
@@ -100,7 +100,7 @@ class MB:
 
 
 static func iso(p: Vector2, z: float) -> Vector2:
-	return Vector2((p.x - p.y) * HW, (p.x + p.y) * HH - z)
+	return Vector2(p.x * HW, p.y * HH - z)
 
 
 ## Repeatable pseudo-random number in 0..1.
@@ -182,7 +182,7 @@ static func bridge(mb: MB, p0: Vector2, p1: Vector2, z: float, is_road: bool, st
 		half_width := -1.0, open_frac := 0.55) -> void:
 	var along := (p1 - p0).normalized()
 	var side := Vector2(-along.y, along.x) * (half_width if half_width > 0.0 else (0.17 if is_road else 0.11))
-	if side.x + side.y < 0.0:
+	if side.y < 0.0:
 		side = -side          # `side` now points towards the camera
 	var concrete := style == "concrete"
 	var wall: Color = {"brick": BRICK, "stone": Color("c3b8a0"), "concrete": Color("bdbcb6")}[style]

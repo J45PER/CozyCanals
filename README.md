@@ -90,7 +90,7 @@ they follow whatever the player draws.
 
 - `scripts/world.gd` - game state and rules (no rendering, so it is testable)
 - `scripts/mapgen.gd` - map generator; `scripts/autobuild.gd` - solver used for budgets and tests
-- `scripts/world_view.gd` - isometric renderer; `scripts/sprites.gd` - sprite loader; `scripts/art.gd` - code-drawn ground and canal structures
+- `scripts/world_view.gd` - front-on 2D renderer (x across, y down; pitch set by Art.HH / Art.HW); `scripts/sprites.gd` - sprite loader; `scripts/art.gd` - code-drawn ground and canal structures
 - `scripts/main.gd` - menu, modes, input, camera and HUD
 - `shaders/paper.gdshader` - paper grain and cloud-shadow overlay
 
