@@ -148,8 +148,11 @@ func _run() -> void:
 	await _tap_control(main._cat_buttons[main.category])
 	_expect("closing the category puts the tool down", main.tool == T.PAN and not main._sub_bar.visible)
 	var at: Vector2 = main.view.position
+	var pan_before: int = world.version
 	await _drag([Vector2(640, 300), Vector2(500, 260)])
-	_expect("one-finger drag pans with no tool", main.view.position.distance_to(at) > 50.0 and world.version == before)
+	print("  pan moved ", main.view.position.distance_to(at), " px, tool=", main.tool, ", world changed=", world.version != pan_before)
+	_expect("one-finger drag pans with no tool", main.view.position.distance_to(at) > 50.0)
+	_expect("panning builds nothing", world.version == pan_before)
 	main.recentre()
 	await create_timer(0.6).timeout
 	_expect("fit returns to the map", main.view.position.distance_to(at) < 2.0)

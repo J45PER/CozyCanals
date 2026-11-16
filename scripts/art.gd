@@ -20,8 +20,8 @@ const EARTH := Color("9a7b56")
 const STONE := Color("c9bea4")
 const HEDGE := Color("557c45")
 const HEDGE_LIGHT := Color("6f9450")
-const RIVER := Color("7fb4bd")
-const RIVER_EDGE := Color("5f98a3")
+const RIVER := Color("86b9b0")           # a touch lighter and greener than canal water
+const RIVER_EDGE := Color("64998f")
 const RIVER_BANK := Color("c6c79a")
 const WATER := Color("6aa3a8")
 const WATER_EDGE := Color("47767e")
@@ -57,6 +57,13 @@ class MB:
 	func fan(pts: PackedVector2Array, col: Color) -> void:
 		for i in range(1, pts.size() - 1):
 			tri(pts[0], pts[i], pts[i + 1], col)
+
+	## A four-cornered patch with a colour at each corner, blended across it.
+	func quad_shaded(a: Vector2, b: Vector2, d: Vector2, e: Vector2, ca: Color, cb: Color, cd: Color, ce: Color) -> void:
+		v.append(a); v.append(b); v.append(d)
+		c.append(ca); c.append(cb); c.append(cd)
+		v.append(a); v.append(d); v.append(e)
+		c.append(ca); c.append(cd); c.append(ce)
 
 	## Convex polygon with a colour at each point, blended across it.
 	func fan_shaded(pts: PackedVector2Array, cols: PackedColorArray) -> void:

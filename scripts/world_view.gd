@@ -31,6 +31,9 @@ var _full_fade := 8            # distance from the land where the haze is comple
 const BOAT_RUN := 6            # cells a boat travels through the countryside
 
 const CANAL_W := 0.2
+const RIVER_W := 0.34            # rivers are wider than canals
+const RIVER_EDGE_W := 0.385
+const RIVER_BANK_W := 0.45
 const BRICK_OLD := Color("9a6a55")       # Victorian engineering brick
 const BRICK_MOSSY := Color("857a5c")
 const STONE_NEW := Color("e2dccb")       # freshly laid coping
@@ -860,23 +863,64 @@ func _emit_terrain(c: Vector2i, mb: Art.MB) -> void:
 	if world.in_bounds(c) and world.building(c) != B.NONE:
 		_emit_plot_ground(c, mb)
 
+	var river := _open_river(c)
+	if not river.is_empty():
+		_stroke(mb, c, river, RIVER_BANK_W, Art.hazed(Art.RIVER_BANK, fade), true, true)
+		_stroke(mb, c, river, RIVER_EDGE_W, Art.hazed(Art.RIVER_EDGE, fade), true, true)
+		_stroke(mb, c, river, RIVER_W, Art.hazed(Art.RIVER, fade), true, true)
+		if fade == 0.0 and Art.rnd(c.x, c.y, 9) > 0.6:
+			Art.stone(mb, _node(c, true) + Vector2(0.08, 0.1), z)
+
+
+# The river's directions through a cell that are still river: where it has
+# been made into canal, the canal replaces it.
+func _open_river(c: Vector2i) -> Array:
 	var river: Array = _river_dirs.get(c, [])
 	if _cont.has(c) and _cont[c][0] == "river":
 		river = _cont[c][1]
 	if world.in_bounds(c) and world.has_canal(c):
-		# Where the river has been made into canal, the canal replaces it;
-		# only stretches of river leading elsewhere are still drawn.
 		var rest := []
 		for d: Vector2 in river:
 			if world.link(c, c + Vector2i(d)) != L.CANAL:
 				rest.append(d)
-		river = rest
-	if not river.is_empty():
-		_stroke(mb, c, river, 0.36, Art.hazed(Art.RIVER_BANK, fade), true, true)
-		_stroke(mb, c, river, 0.29, Art.hazed(Art.RIVER_EDGE, fade), true, true)
-		_stroke(mb, c, river, 0.25, Art.hazed(Art.RIVER, fade), true, true)
-		if fade == 0.0 and Art.rnd(c.x, c.y, 9) > 0.6:
-			Art.stone(mb, _node(c, true) + Vector2(0.08, 0.1), z)
+		return rest
+	return river
+
+
+# A tapering strip from a cell's node out to where a canal leaves the cell,
+# fading from river colours and width into canal ones.
+func _flare(mb: Art.MB, node: Vector2, join: Vector2, w0: float, w1: float, c0: Color, c1: Color, z: float) -> void:
+	var dir := (join - node)
+	if dir.length() < 0.001:
+		return
+	var n := Vector2(-dir.y, dir.x).normalized()
+	var prev_l := Art.iso(node + n * w0, z)
+	var prev_r := Art.iso(node - n * w0, z)
+	var prev_c := c0
+	for i in range(1, 7):
+		var t := i / 6.0
+		var p := node.lerp(join, t)
+		var w := lerpf(w0, w1, t)
+		var col := c0.lerp(c1, smoothstep(0.0, 1.0, t))
+		var l := Art.iso(p + n * w, z)
+		var r := Art.iso(p - n * w, z)
+		mb.quad_shaded(prev_l, l, r, prev_r, prev_c, col, col, prev_c)
+		prev_l = l
+		prev_r = r
+		prev_c = col
+
+
+# A canal cell that river also runs through is a junction: the canal opens
+# out into the wider river water, blending its colours and edging.
+func _emit_river_blend(c: Vector2i, canal: Array, aged: Array, mb: Art.MB, z: float) -> void:
+	var node := _node(c)
+	for i in canal.size():
+		var d: Vector2 = canal[i]
+		var join := _join(c, Vector2i(d))
+		var rim: Color = BRICK_OLD if aged[i] else STONE_NEW
+		_flare(mb, node, join, RIVER_BANK_W, CANAL_W + 0.09, Art.RIVER_BANK, rim, z)
+		_flare(mb, node, join, RIVER_EDGE_W, CANAL_W + 0.03, Art.RIVER_EDGE, Art.WATER_EDGE, z)
+		_flare(mb, node, join, RIVER_W, CANAL_W, Art.RIVER, Art.WATER, z)
 
 
 # A cell with a line or building on it, where field details and hedges stop.
@@ -1042,10 +1086,16 @@ func _emit_links(c: Vector2i, mb: Art.MB) -> void:
 				_band(mb, _join(c, Vector2i(from)), node, _join(c, Vector2i(outs[i])), layer[0], layer[1], z, z, z,
 					layer[3] if (from_aged and outs_aged[i]) else layer[2])
 
-	_stroke(mb, c, canal, CANAL_W + 0.09, STONE_NEW, false, false, aged, BRICK_OLD)
-	_stroke(mb, c, canal, CANAL_W + 0.05, STONE_NEW.darkened(0.08), false, false, aged, Art.COPING)
-	_stroke(mb, c, canal, CANAL_W + 0.03, Art.WATER_EDGE, false)
-	_stroke(mb, c, canal, CANAL_W, Art.WATER, false)
+	var meets_river := not _open_river(c).is_empty()
+	if not (meets_river and canal.size() == 1):
+		_stroke(mb, c, canal, CANAL_W + 0.09, STONE_NEW, false, false, aged, BRICK_OLD)
+		_stroke(mb, c, canal, CANAL_W + 0.05, STONE_NEW.darkened(0.08), false, false, aged, Art.COPING)
+		_stroke(mb, c, canal, CANAL_W + 0.03, Art.WATER_EDGE, false)
+		_stroke(mb, c, canal, CANAL_W, Art.WATER, false)
+	if meets_river:
+		# A canal that ends in a river has no cap of its own: its mouth opens
+		# straight out into the river.
+		_emit_river_blend(c, canal, aged, mb, z)
 	if Art.rnd(c.x, c.y, 44) > 0.75 and canal.size() == 2 and not world.is_bridge(c) and not world.features.has(c):
 		Art.lilies(mb, node, z, c.x + c.y * 3)
 	if world.features.get(c, "") == "basin":
@@ -1583,18 +1633,14 @@ func _emit_standing(c: Vector2i, mb: Art.MB, sprites: Array, smoke: Array) -> vo
 	sprites.append_array(mine)
 
 
-# Animals, bales and the odd tree in the fields.
+# Hay bales and the odd tree in the fields.
 func _emit_field_life(c: Vector2i, mine: Array, fade: float) -> void:
 	var o := Vector2(c)
 	var z := _zc(c)
 	var seed := c.x * 92821 + c.y * 68917
 	var field: Dictionary = _fields[_cell_field[c]]
 	var roll := Art.rnd(c.x, c.y, 99)
-	if field.kind == 0 and roll > 0.84:
-		var animal := "cow" if roll > 0.94 else "sheep"
-		for j in 1 + int(Art.rnd(seed, 2, 2) > 0.4):
-			_put(mine, Sprites.pick(animal, seed + j), o + Vector2(0.3 + 0.4 * j, 0.35 + 0.3 * Art.rnd(seed, j, 4)), z, fade)
-	elif field.kind == 3 and roll > 0.65:
+	if field.kind == 3 and roll > 0.65:
 		_put(mine, "haybale_a", o + Vector2(0.3 + 0.4 * Art.rnd(c.x, c.y, 5), 0.3 + 0.4 * Art.rnd(c.x, c.y, 6)), z, fade)
 	elif roll < 0.03:
 		_put(mine, Sprites.pick("oak", seed), o + Vector2(0.5, 0.5), z, fade)

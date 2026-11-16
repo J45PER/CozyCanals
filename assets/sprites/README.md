@@ -23,7 +23,7 @@ Every standing object in the game is a PNG in this folder, listed in
   another; no code changes are needed.
 - Building stems: `cottage`, `terrace`, `shop`, `cafe`, `pub`, `boatyard`,
   `windmill`, `church`, `farm`, `manor`.
-- Others: `oak`, `pine`, `poplar`, `willow`, `birch`, `bush`, `rock`, `sheep`,
-  `cow`, `haybale`.
-- Boats are `boat_<livery>_<heading>`: 16 headings (00 to 15) going round the
+- Others: `oak`, `pine`, `poplar`, `willow`, `birch`, `bush`, `rock`,
+  `haybale`.
+- Boats are `boat_<livery>_<heading>`: 32 headings (00 to 31) going round the
   compass in map space, for each livery.

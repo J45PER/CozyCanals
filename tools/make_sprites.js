@@ -813,37 +813,6 @@ function rock(name, seed, flip) {
 }
 rock("rock_a", 41, false); rock("rock_b", 42, true);
 
-function sheep(name, seed, face) {
-  T[name] = () => {
-    const s = new Sprite(name, seed);
-    s.shadow(0.52, 0.56, 7, 3, 0.25);
-    const p = P(0.5, 0.5, 4);
-    for (const dx of [-3, 3]) s.line([p[0] + dx, p[1] + 1], [p[0] + dx, p[1] + 4.2], "#2f2a27", 0.9);
-    for (const [dx, dy, r] of [[-2.6, 0, 3], [2.2, 0.2, 3], [0, -1.6, 3.3], [0, 1, 3]]) s.oval([p[0] + dx, p[1] + dy], r, r * 0.82, s.radial("#fffaf0", "#e6dfcd"), { sw: 0.35, stroke: "#b9b09b" });
-    s.oval([p[0] + 5.2 * face, p[1] - 1.4], 2.1, 1.9, "#3b3432", { sw: 0.2 });
-    s.oval([p[0] + 4.2 * face, p[1] - 3.1], 0.9, 0.6, "#3b3432", { stroke: null });
-    return s;
-  };
-}
-sheep("sheep_a", 43, 1); sheep("sheep_b", 44, -1);
-
-function cow(name, seed, face) {
-  T[name] = () => {
-    const s = new Sprite(name, seed);
-    s.shadow(0.52, 0.56, 9, 3.6, 0.25);
-    const p = P(0.5, 0.5, 5.4);
-    for (const dx of [-5, -2.5, 3, 5.4]) s.line([p[0] + dx, p[1] + 1.5], [p[0] + dx, p[1] + 5.6], "#2f2a27", 1.0);
-    s.oval(p, 7.4, 4.2, s.radial("#fbf7ee", "#e3dccb"), { sw: 0.4, stroke: "#a39a86" });
-    s.oval([p[0] - 2.4 * face, p[1] - 1.4], 3, 2.2, "#2f2b29", { stroke: null });
-    s.oval([p[0] + 2.8 * face, p[1] + 1], 2.1, 1.7, "#2f2b29", { stroke: null });
-    s.oval([p[0] + 8.4 * face, p[1] - 2.4], 2.6, 2.3, "#2f2b29", { sw: 0.25 });
-    s.oval([p[0] + 9.8 * face, p[1] - 1.4], 1.4, 1.1, "#e8b7a8", { stroke: null });
-    s.line([p[0] - 7.2 * face, p[1] - 1], [p[0] - 8.6 * face, p[1] + 3], "#2f2a27", 0.5);
-    return s;
-  };
-}
-cow("cow_a", 45, 1); cow("cow_b", 46, -1);
-
 T.haybale_a = () => { const s = new Sprite("haybale_a", 47); s.shadow(0.53, 0.56, 7, 3, 0.25); haybale(s, 0.5, 0.5); return s; };
 
 // --- Narrowboats ---------------------------------------------------------------
