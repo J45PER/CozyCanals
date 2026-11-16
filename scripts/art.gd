@@ -167,15 +167,16 @@ static func signpost(mb: MB, p: Vector2, z: float) -> void:
 
 ## A bridge from p0 to p1 (where the path or road meets the water's banks).
 ## style: "brick" humpback, "stone" arch, or "wood" plank footbridge.
-static func bridge(mb: MB, p0: Vector2, p1: Vector2, z: float, is_road: bool, style: String) -> void:
+static func bridge(mb: MB, p0: Vector2, p1: Vector2, z: float, is_road: bool, style: String, span := 0.7, half_width := -1.0) -> void:
 	var along := (p1 - p0).normalized()
-	var side := Vector2(-along.y, along.x) * (0.17 if is_road else 0.11)
+	var side := Vector2(-along.y, along.x) * (half_width if half_width > 0.0 else (0.17 if is_road else 0.11))
 	if side.x + side.y < 0.0:
 		side = -side          # `side` now points towards the camera
 	var wooden := style == "wood"
 	var wall: Color = {"brick": BRICK, "stone": Color("c3b8a0"), "wood": Color("8a6a45")}[style]
 	var deck := Color("b08a5c") if wooden else (ROAD if is_road else PATH)
-	var hump := 3.0 if wooden else (9.0 if style == "brick" else 7.0)
+	var scale := clampf(span / 0.7, 0.8, 1.7)
+	var hump := (3.0 if wooden else (9.0 if style == "brick" else 7.0)) * scale
 	var steps := 8
 	var prof := []
 	for i in steps + 1:
@@ -206,8 +207,8 @@ static func bridge(mb: MB, p0: Vector2, p1: Vector2, z: float, is_road: bool, st
 		var rise_a := 0.0
 		var rise_b := 0.0
 		if i >= 2 and i <= 5:
-			rise_a = sin((i - 2) / 4.0 * PI) * 6.0
-			rise_b = sin((i - 1) / 4.0 * PI) * 6.0
+			rise_a = sin((i - 2) / 4.0 * PI) * 6.0 * scale
+			rise_b = sin((i - 1) / 4.0 * PI) * 6.0 * scale
 		mb.quad(iso(a, z + rise_a), iso(b, z + rise_b), iso(b, z + top_b), iso(a, z + top_a), wall)
 		if i >= 2 and i <= 5:
 			mb.line(iso(a, z + rise_a), iso(b, z + rise_b), 1.2, wall.darkened(0.3))

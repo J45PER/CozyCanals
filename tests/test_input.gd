@@ -198,5 +198,28 @@ func _run() -> void:
 	await create_timer(0.3).timeout
 	_expect("back to menu", main._menu.visible and main._level_stars[0].filled >= 2)
 
+	# Cars stay on the drawn roads, junctions and bridges included.
+	main.start_free(7)
+	await create_timer(0.3).timeout
+	var v = main.view
+	v.clear_boats()
+	var worst := 0.0
+	var samples := 0
+	for i in 40:
+		v._spawn_car()
+	for tr in v._cars:
+		var pts: PackedVector2Array = tr.pts
+		for k in range(0, pts.size(), 2):
+			worst = maxf(worst, v.road_distance(pts[k]))
+			samples += 1
+	print("  cars: %d tracks, worst distance from a road centreline %.3f cells" % [v._cars.size(), worst])
+	_expect("cars follow the drawn roads", samples > 0 and worst < 0.06)
+	# One bridge per crossing: every road or path over water is a single bridge.
+	var loose := 0
+	for c in main.world.adj:
+		if main.world.has_bridge(c) and not v._bridge_of.has(c):
+			loose += 1
+	_expect("every crossing is one bridge", loose == 0)
+
 	print("PASS" if ok else "FAIL")
 	quit(0 if ok else 1)

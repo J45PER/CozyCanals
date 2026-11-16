@@ -42,6 +42,7 @@ const CINDER_EDGE := Color("8f826b")
 const BOAT_SPEED := 1.3         # cells a second
 const CAR_SPEED := 2.4
 const MAX_CARS := 4
+const BOAT_SCALE := 0.7        # boats are drawn smaller than the sprite's natural size
 ## Paths and roads: half-widths of the verge/edge and the surface, colours,
 ## and markings.
 const LINE_STYLE := {
@@ -87,6 +88,8 @@ var _apron_h := {}             # apron cell -> ground level, carried on from the
 var _apron_d := {}             # apron cell -> distance from the land, in cells
 var _cont := {}                # apron cell -> [kind, dirs, style]: canals, roads, paths, rivers carrying on
 var _cars: Array = []
+var _bridges: Array = []       # one record per bridge: a crossing of water by a path or road
+var _bridge_of := {}           # cell -> index into _bridges, for cells a bridge covers
 var _next_car := 1.0
 var _exit_sig := ""
 var _edge_lines: Array = []    # [[a, b, z], ...] the edge of the playable land
@@ -229,6 +232,8 @@ func set_world(wd: World) -> void:
 	_build_edge()
 	_seen_version = -1
 	_seen_net = -1
+	_bridges.clear()
+	_bridge_of.clear()
 	refresh(Vector2i(-1, -1))
 	_rebuild(9999)
 
@@ -306,6 +311,7 @@ func refresh(near: Vector2i) -> void:
 	if world.version == _seen_version:
 		return
 	_seen_version = world.version
+	_compute_bridges()
 	var rows := _rows()
 	if str(world.exits) != _exit_sig:
 		_build_continuations()
@@ -419,63 +425,94 @@ func spawn_boat(path: Array[Vector2i], dir_in: Vector2i, dir_out: Vector2i) -> v
 func _track(cells: Array[Vector2i], car: bool) -> Dictionary:
 	var pts := PackedVector2Array()
 	var zs := PackedFloat32Array()
+	var owner := PackedInt32Array()      # which cell of `cells` each point belongs to
 	var n := cells.size()
-	for i in n:
+	var i := 0
+	while i < n:
 		var cell := cells[i]
+		if car and _bridge_of.has(cell):
+			# Across a bridge: along the road as drawn, entering from either end.
+			var bi: int = _bridge_of[cell]
+			var br: Dictionary = _bridges[bi]
+			var forward := true
+			if i > 0 and cells[i - 1] == br.outside[1]:
+				forward = false
+			var bp: PackedVector2Array = br.pts
+			var bz: PackedFloat32Array = br.zs
+			for k in bp.size():
+				var idx := k if forward else bp.size() - 1 - k
+				pts.append(bp[idx])
+				zs.append(bz[idx])
+				owner.append(i)
+			while i < n and _bridge_of.get(cells[i], -1) == bi:
+				i += 1
+			continue
 		var back := cells[i - 1] - cell if i > 0 else cell - cells[1]
 		var ahead := cells[i + 1] - cell if i < n - 1 else cell - cells[n - 2]
-		var p0 := _join(cell, back)
-		var pc := _node(cell)
-		var p1 := _join(cell, ahead)
-		var curve: Array[Vector2] = []
-		if car and world.roundabouts.has(cell):
-			var a0 := (p0 - pc).angle()
-			var a1 := (p1 - pc).angle()
-			while a1 <= a0:
-				a1 += TAU
-			curve.append(p0)
-			for k in 7:
-				var a := lerpf(a0, a1, k / 6.0)
-				curve.append(pc + Vector2(cos(a), sin(a)) * 0.3)
-		else:
-			for k in 7:
-				var t := k / 7.0
-				curve.append(p0.lerp(pc, t).lerp(pc.lerp(p1, t), t))
-		var level := _h(cell) * HSTEP
-		for k in curve.size():
-			var q: Vector2 = curve[k]
+		for q in _cell_samples(cell, back, ahead, car):
 			pts.append(q)
-			if car:
-				var z := ground_z(q)
-				if world.in_bounds(cell) and world.has_bridge(cell):
-					var u := clampf(q.distance_to(pc) / 0.5, 0.0, 1.0)
-					z += 8.0 * (1.0 - u * u)
-				zs.append(z)
-			else:
-				# Level water, stepping through a lock at the join with the next cell.
-				var t := float(k) / curve.size()
-				var z := level
-				if t < 0.3 and i > 0:
-					z = lerpf((level + _h(cells[i - 1]) * HSTEP) * 0.5, level, t / 0.3)
-				elif t > 0.7 and i < n - 1:
-					z = lerpf(level, (level + _h(cells[i + 1]) * HSTEP) * 0.5, (t - 0.7) / 0.3)
-				zs.append(z)
+			zs.append(0.0)
+			owner.append(i)
+		i += 1
 	if not car:
-		pts = _keep_right(pts, cells)
+		pts = _keep_right(pts, cells, owner)
 	var cum := PackedFloat32Array([0.0])
-	for i in range(1, pts.size()):
-		cum.append(cum[i - 1] + pts[i - 1].distance_to(pts[i]))
+	for k in range(1, pts.size()):
+		cum.append(cum[k - 1] + pts[k - 1].distance_to(pts[k]))
 	return {"pts": pts, "zs": zs, "cum": cum, "s": 0.0, "i": 0, "look": 0, "side": 0.0, "speed": 1.0}
+
+
+# The path through one cell, matching how it is drawn: a smooth curve where
+# two lines of the same kind pass through, but through the middle of the cell
+# at a junction (where the lines are drawn as spokes meeting there), and
+# round the island at a roundabout.
+func _cell_samples(cell: Vector2i, back: Vector2i, ahead: Vector2i, car: bool) -> Array[Vector2]:
+	var p0 := _join(cell, back)
+	var pc := _node(cell)
+	var p1 := _join(cell, ahead)
+	var out: Array[Vector2] = []
+	if car and world.roundabouts.has(cell):
+		var a0 := (p0 - pc).angle()
+		var a1 := (p1 - pc).angle()
+		while a1 <= a0:
+			a1 += TAU
+		out.append(p0)
+		for k in 7:
+			var a := lerpf(a0, a1, k / 6.0)
+			out.append(pc + Vector2(cos(a), sin(a)) * 0.3)
+		return out
+	var junction := false
+	if world.in_bounds(cell):
+		if car:
+			var lines := _land_lines(cell)
+			junction = lines.size() > 2 or (lines.size() == 2 and lines[0][1] != lines[1][1])
+		else:
+			junction = _water_edges(cell).size() > 2
+	if junction:
+		# Spoke in, a rounded corner at the middle, spoke out.
+		var ia := pc + (p0 - pc) * 0.28
+		var ib := pc + (p1 - pc) * 0.28
+		out.append(p0)
+		out.append(ia)
+		for k in range(1, 5):
+			var t := k / 5.0
+			out.append(ia.lerp(pc, t).lerp(pc.lerp(ib, t), t))
+		out.append(ib)
+		out.append(p1)
+	else:
+		for k in 8:
+			var t := k / 7.0
+			out.append(p0.lerp(pc, t).lerp(pc.lerp(p1, t), t))
+	return out
 
 
 # Boats keep to the right, except past moorings on that side, where they
 # pull over to leave room for the boat tied up there. The offset is smoothed
 # along the track so they ease across.
-func _keep_right(pts: PackedVector2Array, cells: Array[Vector2i]) -> PackedVector2Array:
-	var per_cell := pts.size() / cells.size()
+func _keep_right(pts: PackedVector2Array, cells: Array[Vector2i], owner: PackedInt32Array) -> PackedVector2Array:
 	var want := PackedFloat32Array()
 	for i in pts.size():
-		var cell: Vector2i = cells[mini(i / maxi(per_cell, 1), cells.size() - 1)]
+		var cell: Vector2i = cells[owner[i]]
 		var off := 0.075
 		if world.features.get(cell, "") == "moorings":
 			var a := pts[maxi(i - 1, 0)]
@@ -995,7 +1032,7 @@ func _emit_links(c: Vector2i, mb: Art.MB) -> void:
 	var f: String = world.features.get(c, "")
 	if f.begins_with("lock_"):
 		Art.lock_rim(mb, node, _canal_tangent(c), z, f.trim_prefix("lock_"))
-	if world.is_bridge(c):
+	if world.is_bridge(c) and not _bridge_of.has(c):
 		# Shade on the water under the deck.
 		var land := world.link_dirs(c, [L.PATH, L.ROAD])
 		if land.size() > 0:
@@ -1216,6 +1253,8 @@ func _line_curve(c: Vector2i, d: Vector2, lines: Array) -> Array:
 func _emit_land_lines(c: Vector2i, mb: Art.MB) -> void:
 	if world.in_bounds(c) and world.building(c) != B.NONE:
 		return   # paths and roads carry on into the plot (see _emit_plot_ground)
+	if _bridge_of.has(c):
+		return   # a bridge draws the road across the water (see _emit_bridge)
 	var lines := _land_lines(c)
 	if lines.is_empty():
 		return
@@ -1358,7 +1397,7 @@ func _emit_moorings(c: Vector2i, mb: Art.MB, sprites: Array) -> void:
 	var name := Sprites.boat((c.x * 7 + c.y) % maxi(Sprites.boat_liveries, 1), heading)
 	var at := node + side * 0.11
 	if Sprites.has(name):
-		sprites.append([Sprites.texture(name), Sprites.rect(name, Art.iso(at, z - 1.0)), at.x + at.y, Color.WHITE])
+		sprites.append([Sprites.texture(name), Sprites.rect(name, Art.iso(at, z - 1.0), BOAT_SCALE), at.x + at.y, Color.WHITE])
 
 
 # --- Building plots -----------------------------------------------------------
@@ -1706,17 +1745,254 @@ func _label_anchor(p: Dictionary) -> Vector2:
 # Things that must be drawn over a passing boat: bridges and lock gates.
 func _emit_over(c: Vector2i, mb: Art.MB) -> void:
 	var z := _zc(c)
-	var land := world.link_dirs(c, [L.PATH, L.ROAD])
-	var over_river := _river_dirs.has(c) and not land.is_empty()
-	if (world.is_bridge(c) or over_river) and land.size() > 0:
-		var p0 := _join(c, land[0])
-		var p1 := _join(c, land[1]) if land.size() > 1 else _node(c) * 2.0 - p0
-		var is_road := not world.link_dirs(c, [L.ROAD]).is_empty()
-		var plain := "wood" if (over_river and not world.has_water(c)) else "brick"
-		Art.bridge(mb, p0, p1, z, is_road, world.styles.get(c, plain))
+	if _bridge_of.has(c):
+		var br: Dictionary = _bridges[_bridge_of[c]]
+		if br.owner == c:
+			_emit_bridge(br, mb)
+	else:
+		# A bridge on its own cell, where the crossing is not a simple one.
+		var land := world.link_dirs(c, [L.PATH, L.ROAD])
+		var over_river := _river_dirs.has(c) and not land.is_empty()
+		if (world.is_bridge(c) or over_river) and land.size() > 0:
+			var p0 := _join(c, land[0])
+			var p1 := _join(c, land[1]) if land.size() > 1 else _node(c) * 2.0 - p0
+			var is_road := not world.link_dirs(c, [L.ROAD]).is_empty()
+			var plain := "wood" if (over_river and not world.has_water(c)) else "brick"
+			Art.bridge(mb, p0, p1, z, is_road, world.styles.get(c, plain))
 	var f: String = world.features.get(c, "")
 	if f.begins_with("lock_"):
 		Art.lock_beams(mb, _node(c), _canal_tangent(c), z)
+
+
+## Distance from `p` to the nearest drawn road or path centreline (for tests).
+func road_distance(p: Vector2) -> float:
+	var best := INF
+	var c0 := Vector2i(floori(p.x), floori(p.y))
+	for dx in range(-1, 2):
+		for dy in range(-1, 2):
+			for poly in _road_centrelines(c0 + Vector2i(dx, dy)):
+				for i in range(1, poly.size()):
+					var q := Geometry2D.get_closest_point_to_segment(p, poly[i - 1], poly[i])
+					best = minf(best, p.distance_to(q))
+	return best
+
+
+func _road_centrelines(c: Vector2i) -> Array:
+	var out := []
+	if _bridge_of.has(c):
+		var br: Dictionary = _bridges[_bridge_of[c]]
+		out.append(br.pts)
+		return out
+	if not world.in_bounds(c):
+		if _cont.has(c) and (_cont[c][0] == "road" or _cont[c][0] == "path"):
+			var dirs: Array = _cont[c][1]
+			out.append(PackedVector2Array([_join(c, Vector2i(dirs[0])), _node(c), _join(c, Vector2i(dirs[1]))]))
+		return out
+	var lines := _land_lines(c)
+	var node := _node(c)
+	if world.roundabouts.has(c):
+		var ring := PackedVector2Array()
+		for k in 25:
+			var a := TAU * k / 24.0
+			ring.append(node + Vector2(cos(a), sin(a)) * 0.3)
+		out.append(ring)
+	if lines.size() == 2 and lines[0][1] == lines[1][1]:
+		var pts := PackedVector2Array()
+		var p0 := _join(c, Vector2i(lines[0][0]))
+		var p1 := _join(c, Vector2i(lines[1][0]))
+		for k in 9:
+			var t := k / 8.0
+			pts.append(p0.lerp(node, t).lerp(node.lerp(p1, t), t))
+		out.append(pts)
+	else:
+		for line in lines:
+			out.append(PackedVector2Array([node, _join(c, Vector2i(line[0]))]))
+	return out
+
+
+# --- Bridges ----------------------------------------------------------------------
+# A bridge is one structure per crossing, however many cells of water it
+# spans. It meets the water square-on and is sized to the water's width; the
+# road or path bends on its approaches to meet it, and cars follow that.
+
+func _compute_bridges() -> void:
+	_bridges.clear()
+	_bridge_of.clear()
+	var seen := {}
+	var cells := world.adj.keys()
+	cells.sort()
+	for c0: Vector2i in cells:
+		if seen.has(c0) or not world.in_bounds(c0) or not world.has_bridge(c0):
+			continue
+		var chain: Array[Vector2i] = [c0]
+		seen[c0] = true
+		var head := 0
+		while head < chain.size():
+			var c := chain[head]
+			head += 1
+			for e in world.adj.get(c, []):
+				if (e[1] == L.PATH or e[1] == L.ROAD) and world.in_bounds(e[0]) and world.has_bridge(e[0]) and not seen.has(e[0]):
+					seen[e[0]] = true
+					chain.append(e[0])
+		var exits := []
+		for c in chain:
+			for e in world.adj.get(c, []):
+				if (e[1] == L.PATH or e[1] == L.ROAD) and not chain.has(e[0]):
+					exits.append([c, e[0]])
+		if exits.size() == 2:
+			_make_bridge(chain, exits)
+
+
+func _make_bridge(chain: Array[Vector2i], exits: Array) -> void:
+	var ca: Vector2i = exits[0][0]
+	var oa: Vector2i = exits[0][1]
+	var cb: Vector2i = exits[1][0]
+	var ob: Vector2i = exits[1][1]
+	var entry := _join(ca, oa - ca)
+	var exit := _join(cb, ob - cb)
+	var t_in := (entry - _node(oa)).normalized()
+	var t_out := (_node(ob) - exit).normalized()
+	var mid := (entry + exit) * 0.5
+	var nearest := chain[0]
+	var best := INF
+	for c in chain:
+		var dd := _node(c).distance_to(mid)
+		if dd < best:
+			best = dd
+			nearest = c
+	var tau := _water_tangent(nearest)
+	var half := _water_half(chain)
+	var d := Vector2(-tau.y, tau.x)
+	var run := (exit - entry).normalized()
+	if d.dot(run) < 0.0:
+		d = -d
+	if absf(d.dot(run)) < 0.3:
+		d = run
+	var wn := _node(nearest)
+	var centre := wn + tau * (mid - wn).dot(tau)
+	var span := 2.0 * half + 0.36
+	var a := centre - d * span * 0.5
+	var b := centre + d * span * 0.5
+	var app1 := _approach(entry, t_in, a, d)
+	var app2 := _approach(b, d, exit, t_out)
+	var is_road := false
+	var line_style := "gravel"
+	for c in chain:
+		for e in world.adj.get(c, []):
+			if e[1] == L.ROAD:
+				is_road = true
+				line_style = world.link_style.get(world.key(c, e[0]), "lane")
+			elif e[1] == L.PATH and not is_road:
+				line_style = world.link_style.get(world.key(c, e[0]), "gravel")
+	var all_river := true
+	var style := ""
+	var owner := chain[0]
+	for c in chain:
+		all_river = all_river and not world.has_water(c)
+		if world.styles.has(c) and style == "":
+			style = world.styles[c]
+		if _ri(c) > _ri(owner):
+			owner = c
+	if style == "":
+		style = "wood" if all_river else "brick"
+	# The road's centreline over the whole crossing, with the deck humped.
+	var pts := PackedVector2Array()
+	var zs := PackedFloat32Array()
+	var hump := (3.0 if style == "wood" else (9.0 if style == "brick" else 7.0)) * clampf(span / 0.7, 0.8, 1.7)
+	for q in app1:
+		pts.append(q)
+		zs.append(0.0)
+	for k in range(1, 9):
+		var u := k / 8.0
+		pts.append(a.lerp(b, u))
+		zs.append(hump * sin(u * PI))
+	for q in app2:
+		pts.append(q)
+		zs.append(0.0)
+	var rec := {"cells": chain, "outside": [oa, ob], "a": a, "b": b, "app1": app1, "app2": app2, "pts": pts, "zs": zs,
+		"span": span, "is_road": is_road, "style": style, "line_style": line_style, "owner": owner,
+		"last_row": _ri(owner)}
+	for c in chain:
+		_bridge_of[c] = _bridges.size()
+	_bridges.append(rec)
+
+
+# A smooth S-curve from p0 (leaving along t0) to p1 (arriving along t1).
+func _approach(p0: Vector2, t0: Vector2, p1: Vector2, t1: Vector2) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	var k := p0.distance_to(p1) * 0.38
+	var c1 := p0 + t0 * k
+	var c2 := p1 - t1 * k
+	for i in 9:
+		var t := i / 8.0
+		var u := 1.0 - t
+		out.append(u * u * u * p0 + 3.0 * u * u * t * c1 + 3.0 * u * t * t * c2 + t * t * t * p1)
+	return out
+
+
+func _water_tangent(c: Vector2i) -> Vector2:
+	var edges := _water_edges(c)
+	if edges.size() >= 2:
+		return (_join(c, Vector2i(edges[1][0])) - _join(c, Vector2i(edges[0][0]))).normalized()
+	if edges.size() == 1:
+		return (edges[0][0] as Vector2).normalized()
+	return Vector2(1, 0)
+
+
+# Half the width of the widest water under a crossing, rim included.
+func _water_half(chain: Array[Vector2i]) -> float:
+	var half := CANAL_W + RIM_CANAL
+	for c in chain:
+		for e in _water_edges(c):
+			var end := _water_end(e)
+			half = maxf(half, end.w + end.x)
+	return half
+
+
+func _emit_bridge(br: Dictionary, mb: Art.MB) -> void:
+	var st: Dictionary = LINE_STYLE[br.line_style]
+	for app in [br.app1, br.app2]:
+		_poly_band(mb, app, st.edge, st.edge_col, 0.7)
+		_poly_band(mb, app, st.w, st.col, 0.8)
+		if st.get("marks", false):
+			_poly_dashes(mb, app)
+	var a: Vector2 = br.a
+	var b: Vector2 = br.b
+	_poly_band(mb, PackedVector2Array([a.lerp(b, 0.15), a.lerp(b, 0.85)]), st.edge, Color(0.1, 0.18, 0.2, 0.4), 0.5)
+	Art.bridge(mb, a, b, 0.0, br.is_road, br.style, br.span, st.edge)
+
+
+## A ribbon of half-width `hw` along a list of points.
+func _poly_band(mb: Art.MB, pts: PackedVector2Array, hw: float, col: Color, lift: float) -> void:
+	var pl := Vector2.ZERO
+	var pr := Vector2.ZERO
+	var started := false
+	for i in pts.size():
+		var t := pts[mini(i + 1, pts.size() - 1)] - pts[maxi(i - 1, 0)]
+		if t.length() < 0.0001:
+			continue
+		var n := Vector2(-t.y, t.x).normalized()
+		var l := Art.iso(pts[i] + n * hw, lift)
+		var r := Art.iso(pts[i] - n * hw, lift)
+		if started:
+			mb.quad(pl, l, r, pr, col)
+		pl = l
+		pr = r
+		started = true
+
+
+func _poly_dashes(mb: Art.MB, pts: PackedVector2Array) -> void:
+	var run := 0.0
+	for i in range(1, pts.size()):
+		var a := pts[i - 1]
+		var b := pts[i]
+		var seg := a.distance_to(b)
+		if seg < 0.0001:
+			continue
+		if fmod(run, 0.16) < 0.08:
+			var n := (b - a).orthogonal().normalized() * 0.012
+			mb.quad(Art.iso(a - n, 0.9), Art.iso(b - n, 0.9), Art.iso(b + n, 0.9), Art.iso(a + n, 0.9), Color("f1ece0"))
+		run += seg
 
 
 # --- Drawing ----------------------------------------------------------------
@@ -1739,6 +2015,8 @@ func _draw() -> void:
 	for tr in _cars:
 		var st := _mover_state(tr)
 		var slot := clampi(_ri(st.cell), 0, rows - 1)
+		if _bridge_of.has(st.cell):
+			slot = maxi(slot, _bridges[_bridge_of[st.cell]].last_row)
 		if not car_slots.has(slot):
 			car_slots[slot] = []
 		car_slots[slot].append(st)
@@ -1789,14 +2067,14 @@ func _draw_boat(st: Dictionary) -> void:
 	var fade := 0.0
 	# Wake trailing from the stern.
 	for j in 3:
-		draw_circle(Art.iso(flat - dir * (0.6 + j * 0.12), pos.z + 1.0), 3.6 - j * 0.8, Color(1, 1, 1, (0.26 - j * 0.07) * alpha))
+		draw_circle(Art.iso(flat - dir * ((0.6 + j * 0.12) * BOAT_SCALE), pos.z + 1.0), (3.6 - j * 0.8) * BOAT_SCALE, Color(1, 1, 1, (0.26 - j * 0.07) * alpha))
 	# The sprite set has the boat drawn from a ring of headings; use the nearest.
 	var heading := int(round(atan2(dir.y, dir.x) / TAU * Sprites.boat_directions))
 	var name := Sprites.boat(st.look, heading)
 	if Sprites.has(name):
 		var tint := Color.WHITE.lerp(Art.MIST, fade * 0.8)
 		tint.a = alpha
-		draw_texture_rect(Sprites.texture(name), Sprites.rect(name, Art.iso(flat, pos.z)), false, tint)
+		draw_texture_rect(Sprites.texture(name), Sprites.rect(name, Art.iso(flat, pos.z), BOAT_SCALE), false, tint)
 
 
 func _draw_car(st: Dictionary) -> void:

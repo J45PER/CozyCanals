@@ -57,7 +57,7 @@ with a gap and a front path or drive on the side its path or road arrives.
 Pubs, shops, cafes, farms, boatyards and manors get a car park once a road
 reaches them.
 
-A path or road that crosses water gets a bridge automatically (+20).
+A path or road that crosses water gets a bridge automatically (+20). A crossing is always one bridge, however many cells of water it spans: it meets the water square-on, is sized to the water's width, and the road or path curves on its approaches to meet it.
 
 Restored canal keeps its Victorian look (brick edging, cinder towpath); newly
 dug cut has pale stone coping and a fresh gravel towpath.

@@ -35,6 +35,21 @@ func _check(label: String, params: Dictionary) -> bool:
 			# Bulldozing gives back half.
 			ok = ok and world.coins < budget and world.coins >= budget - result.cost and world.links == again.links
 			break
+	# Old canal only exists as long, continuous stretches of one route.
+	var stubs := 0
+	var seen_runs := {}
+	for k in world.links:
+		if world.links[k] == L.DERELICT:
+			var cell := world.key_cells(k)[0]
+			var run := world.derelict_run(cell)
+			var id := world.key(run[0][0], run[0][1])
+			if not seen_runs.has(id):
+				seen_runs[id] = true
+				if run.size() < 4:
+					stubs += 1
+	ok = ok and stubs == 0
+	if stubs > 0:
+		print("  short stubs of old canal: ", stubs)
 	# A sensible solution fits the budget and earns the first two stars.
 	ok = ok and AutoBuild.run(world) and world.all_linked() and world.stars() >= 2 and world.coins >= 0
 	var n := world.portals.size()
@@ -92,19 +107,27 @@ func _init() -> void:
 	for k in free.links:
 		if free.links[k] == L.ROAD:
 			var cells := free.key_cells(k)
-			extras = extras and free.add_verge(cells[0], cells[1], "hedge") == ""
+			var e1: String = free.add_verge(cells[0], cells[1], "hedge")
+			if e1 != "":
+				print("  hedge: ", e1)
+			extras = extras and e1 == ""
 			extras = extras and free.add_verge(cells[0], cells[1], "wall") != ""
 			for c in cells:
 				if road_cell.x < 0 and free.link_dirs(c, [L.ROAD]).size() == 2 and not free.has_water(c):
 					road_cell = c
 			break
 	if road_cell.x >= 0:
-		for d in World.DIRS4:
+		var spur := false
+		for d in World.DIRS8:
 			var n := road_cell + d
-			if free.in_bounds(n) and not free.adj.has(n) and free.terrain_at(n) == World.T.GRASS and free.building(n) == World.B.NONE:
-				extras = extras and free.add_link(road_cell, n, L.ROAD, "lane") == ""
-				break
-		extras = extras and free.add_roundabout(road_cell) == "" and free.roundabouts.has(road_cell)
+			if not spur and free.in_bounds(n) and not free.adj.has(n) and free.terrain_at(n) == World.T.GRASS and free.building(n) == World.B.NONE:
+				if free.add_link(road_cell, n, L.ROAD, "lane") == "":
+					spur = true
+		extras = extras and spur
+		var e3: String = free.add_roundabout(road_cell)
+		if e3 != "":
+			print("  roundabout: ", e3)
+		extras = extras and e3 == "" and free.roundabouts.has(road_cell)
 	var edge_done := false
 	for y in free.h:
 		for x in free.w:
