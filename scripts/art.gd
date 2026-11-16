@@ -8,7 +8,7 @@ const World := preload("res://scripts/world.gd")
 const B := World.B
 
 const HW := 36.0      # half cell width on screen
-const HH := 18.0      # half cell height on screen
+const HH := 27.0      # half cell height on screen (higher = more top-down)
 const HSTEP := 9.0    # screen pixels per terrain level: a low bank
 
 # Fields: pasture, meadow, wheat, cut hay, ploughed.
