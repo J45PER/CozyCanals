@@ -2,6 +2,7 @@ extends Node2D
 ## Game controller: menu and modes, touch/mouse input, boat traffic and the HUD.
 
 const World := preload("res://scripts/world.gd")
+const BuildInfo := preload("res://scripts/build_info.gd")
 const WorldView := preload("res://scripts/world_view.gd")
 const MapGen := preload("res://scripts/mapgen.gd")
 const AutoBuild := preload("res://scripts/autobuild.gd")
@@ -1142,6 +1143,8 @@ func _build_menu() -> void:
 	strap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_menu_home.add_child(strap)
 	_menu_home.add_child(Control.new())
+	var stamp := _label(BuildInfo.STAMP, 12, MUTED)
+	stamp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var big := Vector2(380, 58)
 	_menu_home.add_child(_mode_button("Journey", "Ten waterways to restore, three stars each", big,
 		func(): _menu_home.hide(); _menu_levels.show()))
@@ -1149,6 +1152,7 @@ func _build_menu() -> void:
 	_daily_best = _menu_home.get_child(_menu_home.get_child_count() - 1).get_meta("sub")
 	_menu_home.add_child(_mode_button("Free Build", "A wide open map, no budget, no goals", big,
 		func(): start_free(randi() % 100000)))
+	_menu_home.add_child(stamp)
 
 	_menu_levels = _vbox(stack, 14)
 	var heading := _label("Journey", 34)
