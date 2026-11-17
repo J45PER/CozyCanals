@@ -1,0 +1,1201 @@
+extends Node2D
+## Game controller: menu and modes, touch/mouse input, boat traffic and the HUD.
+
+const World := preload("res://scripts/world.gd")
+const BuildInfo := preload("res://scripts/build_info.gd")
+const WorldView := preload("res://scripts/world_view.gd")
+const MapGen := preload("res://scripts/mapgen.gd")
+const AutoBuild := preload("res://scripts/autobuild.gd")
+const Levels := preload("res://scripts/levels.gd")
+const ToolButton := preload("res://scripts/tool_button.gd")
+const T := World.Tool
+const L := World.L
+
+const INK := Color("4a3b2e")
+const MUTED := Color("85735c")
+const CREAM := Color("f8efd9")
+const EDGE := Color("d2bd92")
+const GOLD := Color("e8ad2e")
+const SAVE_PATH := "user://save.cfg"
+
+const MAX_BOATS := 3
+const BOAT_GAP := 4.0   # seconds between boats setting off
+## The build bar: categories along the bottom, each opening a row of tools.
+## [name, icon tool, [[tool, label, cost], ...]]
+const CATEGORIES := [
+	["Restore", T.RESTORE, [[T.RESTORE, "Restore", "4 a length"]]],
+	["Waterways", T.CANAL, [
+		[T.CANAL, "Canal", "12 a step"],
+		[T.MOORINGS, "Moorings", "10"],
+		[T.BASIN, "Wide water", "25"],
+		[T.LOCK_STONE, "Stone lock", "15"],
+		[T.LOCK_BRICK, "Brick lock", "15"]]],
+	["Roads & Paths", T.PATH, [
+		[T.PATH, "Gravel path", "2 a step"],
+		[T.PATH_TARMAC, "Tarmac path", "4 a step"],
+		[T.PATH_DIRT, "Dirt track", "1 a step"],
+		[T.ROAD, "Lane", "6 a step"],
+		[T.ROAD_WIDE, "Road", "10 a step"],
+		[T.ROUNDABOUT, "Roundabout", "30"],
+		[T.BRIDGE_BRICK, "Brick bridge", "rebuild 10"],
+		[T.BRIDGE_STONE, "Stone bridge", "rebuild 10"],
+		[T.BRIDGE_CONCRETE, "Concrete bridge", "rebuild 10"]]],
+	["Buildings", T.COTTAGE, [
+		[T.COTTAGE, "Cottage", "25"], [T.TERRACE, "Terrace", "40"], [T.SHOP, "Shop", "45"],
+		[T.CAFE, "Cafe", "35"], [T.PUB, "Pub", "50"], [T.BOATYARD, "Boatyard", "60"],
+		[T.WINDMILL, "Windmill", "70"],
+		[T.CARPARK, "Car park", "15"], [T.GARDEN, "Beer garden", "20"]]],
+	["Nature", T.TREE, [
+		[T.TREE, "Trees", "2"],
+		[T.HEDGE_ROW, "Hedgerow", "3 a length"],
+		[T.WALL_ROW, "Stone wall", "4 a length"],
+		[T.FENCE_ROW, "Fence", "2 a length"]]],
+	["Bulldoze", T.ERASE, [[T.ERASE, "Bulldoze", "half back"]]],
+]
+## Shown when a tool is picked, so its use is clear.
+const TOOL_HINTS := {
+	T.RESTORE: "Tap or drag along the silted canal to restore it",
+	T.CANAL: "Drag to dig a canal",
+	T.PATH: "Drag a footpath from a place to the towpath. Drag off the map's edge to lead it away",
+	T.PATH_TARMAC: "Drag a tarmac path",
+	T.PATH_DIRT: "Drag a dirt track",
+	T.ROAD: "Drag a country lane. Drag off the map's edge to lead it away",
+	T.ROAD_WIDE: "Drag a road with a white line down the middle",
+	T.ROUNDABOUT: "Tap a junction where three or more roads meet",
+	T.HEDGE_ROW: "Drag along a path or road to plant a hedge each side",
+	T.WALL_ROW: "Drag along a path or road to build a dry-stone wall each side",
+	T.FENCE_ROW: "Drag along a path or road to put up a fence each side",
+	T.LOCK_STONE: "Tap a canal to add a stone lock (decoration)",
+	T.LOCK_BRICK: "Tap a canal to add a Victorian brick lock (decoration)",
+	T.BRIDGE_BRICK: "Tap a bridge to rebuild it as a brick arch",
+	T.BRIDGE_STONE: "Tap a bridge to rebuild it as a stone arch",
+	T.BRIDGE_CONCRETE: "Tap a bridge to rebuild it as a modern concrete bridge",
+	T.MOORINGS: "Tap a canal to add moorings - bollards and a boat tied up",
+	T.BASIN: "Tap a canal to widen it into a winding hole",
+	T.CARPARK: "Put a car park next to a building or road - it joins that building's plot",
+	T.GARDEN: "Put a beer garden next to a pub, cafe or any building - it joins that plot",
+	T.ERASE: "Tap to knock down what you built (half back), clear trees (6), or a map building (40)",
+}
+const SUPERSAMPLE_PIXELS := 6000000.0   # render budget for smoothing edges
+
+
+class StarRow extends Control:
+	var filled := 0:
+		set(v):
+			filled = v
+			queue_redraw()
+	var count := 3
+	var px := 20.0
+
+	func _init(star_px: float, stars := 3) -> void:
+		px = star_px
+		count = stars
+		custom_minimum_size = Vector2(px * count + 4.0 * (count - 1), px)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		for s in count:
+			var c := Vector2(px * 0.5 + s * (px + 4.0), px * 0.5)
+			var pts := PackedVector2Array()
+			for i in 10:
+				var a := -PI / 2 + TAU * i / 10.0
+				pts.append(c + Vector2(cos(a), sin(a)) * (px * 0.5 if i % 2 == 0 else px * 0.22))
+			draw_colored_polygon(pts, Color("e8ad2e") if s < filled else Color("d6c9ab"))
+
+
+class CoinIcon extends Control:
+	func _init() -> void:
+		custom_minimum_size = Vector2(24, 24)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		draw_circle(size * 0.5, 11, Color("c98f2a"))
+		draw_circle(size * 0.5, 8, Color("f1c84b"))
+
+
+var world: World
+var view: WorldView
+var mode := "menu"          # menu, journey, daily or free
+var level_idx := 0
+var tool: int = T.PAN
+var category := -1
+
+var _save := ConfigFile.new()
+var _font: Font
+var _touches := {}
+var _painting := false
+var _last_cell := Vector2i(-1, -1)
+var _down_cell := Vector2i(-1, -1)
+var _last_f := Vector2.ZERO          # where the finger last was, in map coordinates
+var _stroke_best := {}               # cell -> how near the finger has passed to its middle
+var _stroke_links := 0
+var _pinch_dist := 0.0
+var _tool_touch := false    # this touch began with a tool picked, so it must not pan
+var _pending := {}          # a finger that is down but not yet drawing: {pos}
+var _fling := Vector2.ZERO   # map glides on after a flick, in pixels per second
+var _pan_speed := Vector2.ZERO
+const DRAW_START := 10.0      # pixels a finger must move before it starts drawing
+var _pinch_mid := Vector2.ZERO
+var _was_joined := false
+var _celebrated := false
+var _net_version := -1
+var _next_boat := 0.0
+var _free_seed := 1
+
+var _hud: Control
+var _game_ui: Array[Control] = []
+var _title: Label
+var _blurb: Label
+var _coins: Label
+var _coin_icon: CoinIcon
+var _goal_stars: Array[StarRow] = []
+var _goal_labels: Array[Label] = []
+var _new_land: Button
+var _tool_buttons: Array[ToolButton] = []
+var _cat_buttons: Array[ToolButton] = []
+var _sub_bar: PanelContainer
+var _sub_box: HBoxContainer
+var _camera_box: Control
+var _stage_vp: SubViewport
+var _stage: Node2D
+var _view_tween: Tween
+var _restored := [0, 0]   # lengths and coins in the current restore stroke
+var _exit_made := false
+var _toast: PanelContainer
+var _toast_label: Label
+var _toast_tween: Tween
+var _done: PanelContainer
+var _done_title: Label
+var _done_text: Label
+var _done_stars: StarRow
+var _done_next: Button
+var _finish_btn: Button
+var _menu: PanelContainer
+var _menu_home: Control
+var _menu_levels: Control
+var _level_stars: Array[StarRow] = []
+var _daily_best: Label
+
+
+func _ready() -> void:
+	_save.load(SAVE_PATH)
+	var serif := SystemFont.new()
+	serif.font_names = PackedStringArray(["Georgia", "Palatino Linotype", "Book Antiqua", "Noto Serif", "DejaVu Serif", "serif"])
+	_font = serif
+	view = WorldView.new()
+	view.boat_arrived.connect(_on_boat_arrived)
+	_build_stage()
+	_build_overlay()
+	_build_hud()
+	view._font = _font
+	get_viewport().size_changed.connect(func(): _resize_stage(); _fit_view())
+	show_menu()
+
+
+# --- Modes ------------------------------------------------------------------
+
+func show_menu() -> void:
+	mode = "menu"
+	# A finished map with boats running makes the backdrop.
+	var params := Levels.free_build(int(Time.get_unix_time_from_system()) % 1000)
+	params.merge({"w": 24, "h": 17, "portals": 3}, true)
+	var backdrop := MapGen.generate(params)
+	AutoBuild.run(backdrop)
+	_use_world(backdrop)
+	view.show_labels = false
+	for c in _game_ui:
+		c.hide()
+	_sub_bar.hide()
+	_done.hide()
+	_toast.hide()
+	_refresh_menu()
+	_menu_home.show()
+	_menu_levels.hide()
+	_menu.show()
+
+
+func start_journey(idx: int) -> void:
+	mode = "journey"
+	level_idx = posmod(idx, Levels.JOURNEY.size())
+	var params: Dictionary = Levels.JOURNEY[level_idx]
+	_start(MapGen.generate(params), "%d. %s" % [level_idx + 1, params.name])
+
+
+func start_daily() -> void:
+	mode = "daily"
+	_start(MapGen.generate(Levels.daily(Time.get_date_dict_from_system())), "")
+
+
+func start_free(seed_: int) -> void:
+	mode = "free"
+	_free_seed = seed_
+	_start(MapGen.generate(Levels.free_build(seed_)), "")
+
+
+func _start(wd: World, heading: String) -> void:
+	_use_world(wd)
+	view.show_labels = true
+	_menu.hide()
+	_done.hide()
+	for c in _game_ui:
+		c.show()
+	_toast.hide()
+	_title.text = heading if heading != "" else world.title
+	_blurb.text = world.blurb
+	_new_land.visible = mode == "free"
+	_coins.visible = not world.unlimited
+	_coin_icon.visible = not world.unlimited
+	for b in _tool_buttons:
+		if b.tool_id == T.ROAD:
+			b.visible = world.allow_roads
+	_open_category(-1)
+	_refresh()
+
+
+func _use_world(wd: World) -> void:
+	world = wd
+	world.changed.connect(_refresh)
+	view.set_world(world)
+	_was_joined = world.linked > 1
+	_celebrated = false
+	_net_version = world.net_version
+	_next_boat = 0.5
+	_fit_view()
+
+
+# The map is drawn into an off-screen image at up to twice the screen's
+# resolution and scaled down, which smooths every edge. HUD stays sharp.
+func _build_stage() -> void:
+	_stage_vp = SubViewport.new()
+	_stage_vp.disable_3d = true
+	_stage_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	_stage_vp.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	add_child(_stage_vp)
+	_stage = Node2D.new()
+	_stage_vp.add_child(_stage)
+	_stage.add_child(view)
+	var layer := CanvasLayer.new()
+	layer.layer = 0
+	add_child(layer)
+	var screen := TextureRect.new()
+	screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	screen.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	screen.stretch_mode = TextureRect.STRETCH_SCALE
+	screen.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	screen.texture = _stage_vp.get_texture()
+	layer.add_child(screen)
+	_resize_stage()
+
+
+func _resize_stage() -> void:
+	var virt := get_viewport().get_visible_rect().size
+	var px := Vector2(DisplayServer.window_get_size())
+	if virt.x <= 0.0 or px.x <= 0.0:
+		return
+	var k := px.x / virt.x
+	var ss := clampf(sqrt(SUPERSAMPLE_PIXELS / (px.x * px.y)), 1.0, 2.0)
+	_stage_vp.size = Vector2i((virt * k * ss).ceil())
+	_stage.scale = Vector2.ONE * k * ss
+
+
+func _fit_rect() -> Rect2:
+	var vp := get_viewport_rect().size
+	if mode == "menu":
+		return Rect2(Vector2.ZERO, vp)
+	return Rect2(24, 50, vp.x - 48 - 60, vp.y - 50 - 150)
+
+
+func _fit_view() -> void:
+	if world == null:
+		return
+	var area := _fit_rect()
+	var b := view.bounds()
+	var s := minf(minf(area.size.x / b.size.x, area.size.y / b.size.y), 1.6)
+	if mode == "menu":
+		s *= 1.25
+	view.scale = Vector2(s, s)
+	view.position = area.get_center() - b.get_center() * s
+
+
+## Glides back to the whole map in view.
+func recentre() -> void:
+	if world == null:
+		return
+	_fling = Vector2.ZERO
+	var keep_s := view.scale
+	var keep_p := view.position
+	_fit_view()
+	var to_s := view.scale
+	var to_p := view.position
+	view.scale = keep_s
+	view.position = keep_p
+	if _view_tween:
+		_view_tween.kill()
+	_view_tween = create_tween().set_parallel().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_view_tween.tween_property(view, "scale", to_s, 0.35)
+	_view_tween.tween_property(view, "position", to_p, 0.35)
+
+
+func _fit_scale() -> float:
+	var area := _fit_rect()
+	var b := view.bounds()
+	return minf(minf(area.size.x / b.size.x, area.size.y / b.size.y), 1.6)
+
+
+func _zoom_at(point: Vector2, factor: float) -> void:
+	var old := view.scale.x
+	# No further out than the whole map; the countryside beyond is scenery.
+	var s := clampf(old * factor, _fit_scale() * 0.9, 3.5)
+	var local := (point - view.position) / old
+	view.scale = Vector2(s, s)
+	view.position = point - local * s
+	_clamp_view()
+
+
+func _pan(by: Vector2) -> void:
+	view.position += by
+	_clamp_view()
+
+
+# Keeps the middle of the screen over the playable map, so the view can
+# never wander off into the countryside.
+func _clamp_view() -> void:
+	if world == null or mode == "menu":
+		return
+	var mid := _fit_rect().get_center()
+	var local := (mid - view.position) / view.scale.x
+	var m := Vector2(local.x / WorldView.HW, local.y / WorldView.HH)
+	# The further out the zoom, the closer to the middle the view is held, so
+	# the screen is always mostly playable map.
+	var area := _fit_rect().size
+	var reach := minf(area.x / (view.scale.x * WorldView.HW), area.y / (view.scale.y * WorldView.HH)) * 0.45
+	var lo := Vector2(minf(reach, world.w * 0.5), minf(reach, world.h * 0.5))
+	var held := m.clamp(lo, Vector2(world.w, world.h) - lo)
+	if held == m:
+		return
+	var back := Vector2(held.x * WorldView.HW, held.y * WorldView.HH)
+	view.position = mid - back * view.scale.x
+	_fling = Vector2.ZERO
+
+
+func _process(delta: float) -> void:
+	if world == null:
+		return
+	if _fling.length() > 8.0:
+		_pan(_fling * delta)
+		_fling *= pow(0.04, delta)   # glide to a stop in about a second
+	view.refresh(Vector2i(-1, -1))   # catches changes not made through the tools
+	# Keep a little traffic moving between any portals that are joined up.
+	_next_boat -= delta
+	if _next_boat > 0.0 or world.traffic.is_empty() or view.boat_count() >= MAX_BOATS:
+		return
+	_next_boat = BOAT_GAP
+	var pair: Array = world.traffic.pick_random()
+	if randf() < 0.5:
+		pair = [pair[1], pair[0]]
+	# Boats come and go at canal portals and at the ends of rivers.
+	var ends := world.water_ends()
+	var from: Dictionary = ends[pair[0]]
+	var to: Dictionary = ends[pair[1]]
+	var path := world.path_between(from.cell, to.cell)
+	if path.size() >= 2:
+		view.spawn_boat(path, from.dir, to.dir)
+
+
+# --- Input ------------------------------------------------------------------
+
+func _unhandled_input(event: InputEvent) -> void:
+	if mode == "menu":
+		return
+	if event is InputEventScreenTouch:
+		_pinch_dist = 0.0
+		if event.pressed:
+			_touches[event.index] = event.position
+			_fling = Vector2.ZERO
+			_pan_speed = Vector2.ZERO
+			if _touches.size() == 1 and tool != T.PAN:
+				# With a tool picked, one finger only ever draws; it never moves
+				# the map. Wait to see whether this is a tap, a drag, or the
+				# first of two fingers.
+				_tool_touch = true
+				_pending = {"pos": event.position}
+			else:
+				_pending = {}
+				if _painting:
+					_end_stroke()
+				_painting = false
+		else:
+			_touches.erase(event.index)
+			if not _pending.is_empty():
+				# A tap: use the tool once where the finger was.
+				_begin_stroke(_pending.pos)
+				_pending = {}
+			if _painting:
+				_end_stroke()
+			elif _touches.is_empty() and _pan_speed.length() > 120.0:
+				_fling = _pan_speed
+			_painting = false
+			if _touches.is_empty():
+				_tool_touch = false
+			view.hover = Vector2i(-1, -1)
+	elif event is InputEventScreenDrag:
+		_touches[event.index] = event.position
+		if _touches.size() >= 2:
+			_pending = {}
+			var pts := _touches.values()
+			var mid: Vector2 = (pts[0] + pts[1]) * 0.5
+			var dist: float = pts[0].distance_to(pts[1])
+			if _pinch_dist > 0.0:
+				_pan(mid - _pinch_mid)
+				_zoom_at(mid, dist / _pinch_dist)
+			_pinch_dist = dist
+			_pinch_mid = mid
+		elif not _pending.is_empty():
+			if event.position.distance_to(_pending.pos) >= DRAW_START:
+				_begin_stroke(_pending.pos)
+				_pending = {}
+				_use_tool(event.position, false)
+		elif _painting:
+			_use_tool(event.position, false)
+		elif _touches.size() == 1 and not _tool_touch:
+			_pan(event.relative)
+			var dt := maxf(get_process_delta_time(), 1.0 / 120.0)
+			_pan_speed = _pan_speed.lerp(event.relative / dt, 0.35)
+	elif event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_zoom_at(event.position, 1.1)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_zoom_at(event.position, 1.0 / 1.1)
+	elif event is InputEventMagnifyGesture:
+		_zoom_at(event.position, event.factor)
+	elif event is InputEventPanGesture:
+		_pan(-event.delta * 16.0)
+	elif event is InputEventMouseMotion:
+		if event.button_mask & (MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE):
+			_pan(event.relative)
+		var c := _cell_under(event.position)
+		view.hover = c if tool != T.PAN else Vector2i(-1, -1)
+		view.hover_ok = true
+
+
+func _begin_stroke(pos: Vector2) -> void:
+	_painting = true
+	_last_cell = Vector2i(-1, -1)
+	_restored = [0, 0]
+	_exit_made = false
+	_use_tool(pos, true)
+
+
+func _cell_under(screen_pos: Vector2) -> Vector2i:
+	return view.cell_at((screen_pos - view.position) / view.scale.x)
+
+
+# The point of the map under a finger, measured on the level of cell `c`.
+func _finger(screen_pos: Vector2, _c: Vector2i) -> Vector2:
+	return view.map_at((screen_pos - view.position) / view.scale.x)
+
+
+func _use_tool(screen_pos: Vector2, first: bool) -> void:
+	var c := _cell_under(screen_pos)
+	if not world.in_bounds(c):
+		_try_exit(screen_pos)
+		return
+	if World.TOOL_LINK.has(tool) or World.VERGE_TOOLS.has(tool):
+		_draw_line_to(c, _finger(screen_pos, c), first)
+		return
+	if c == _last_cell:
+		return
+	_last_cell = c
+	if tool == T.RESTORE:
+		var result := world.restore_at(c)
+		if result.err == "":
+			_restored[0] += result.count
+			_restored[1] += result.cost
+			view.add_puff(c)
+			view.refresh(c)
+		elif first or result.cost > 0:
+			_show_toast(result.err)
+		return
+	if World.STYLE_TOOLS.has(tool):
+		if not first:
+			return
+		var err := world.restyle(tool, c)
+		if err == "":
+			view.add_puff(c)
+			view.refresh(c)
+		else:
+			_show_toast(err)
+		return
+	if tool == T.ERASE:
+		if not first:
+			return
+		var plan := world.check_bulldoze(c)
+		var err := world.bulldoze(c)
+		if err == "":
+			view.add_puff(c)
+			view.refresh(c)
+			if plan.what == "trees":
+				_show_toast("Trees cleared for %d coins" % -plan.coins)
+			elif plan.what == "place":
+				_show_toast("Knocked down for %d coins" % -plan.coins)
+			else:
+				_show_toast("Knocked down - %d coins back" % plan.coins)
+		else:
+			_show_toast(err)
+		return
+	if World.CANAL_FEATURES.has(tool):
+		if not first:
+			return
+		var ferr := world.add_feature(c, World.CANAL_FEATURES[tool])
+		if ferr == "":
+			view.add_puff(c)
+			view.refresh(c)
+		else:
+			_show_toast(ferr)
+		return
+	if tool == T.ROUNDABOUT:
+		if not first:
+			return
+		var err := world.add_roundabout(c)
+		if err == "":
+			view.add_puff(c)
+			view.refresh(c)
+		else:
+			_show_toast(err)
+		return
+	if not first and tool != T.TREE:
+		return
+	var err := world.place(tool, c)
+	if err == "":
+		view.add_puff(c)
+		view.refresh(c)
+	elif first:
+		_show_toast(err)
+
+
+# A path or road dragged off the edge of the map carries on into the
+# countryside beyond.
+func _try_exit(screen_pos: Vector2) -> void:
+	if not _painting or _exit_made or _last_cell.x < 0 or not World.TOOL_LINK.has(tool):
+		return
+	var type: int = World.TOOL_LINK[tool]
+	if type != L.PATH and type != L.ROAD:
+		return
+	var f := _finger(screen_pos, _last_cell)
+	var v := f - world.node(_last_cell)
+	var d := Vector2i(signi(roundi(v.x)) if absf(v.x) >= absf(v.y) else 0, signi(roundi(v.y)) if absf(v.y) > absf(v.x) else 0)
+	if d == Vector2i.ZERO or world.in_bounds(_last_cell + d):
+		return
+	_exit_made = true
+	var err := world.add_exit(_last_cell, d, type, World.TOOL_STYLE[tool])
+	if err == "":
+		view.refresh(_last_cell)
+		_show_toast("Leads off the map - traffic can come and go here" if type == L.ROAD else "Leads off the map")
+	else:
+		_show_toast(err)
+
+
+# Lines are linked cell to cell underneath, but each cell's part of the line
+# is placed where the finger actually passed, so the line follows the drag.
+func _draw_line_to(c: Vector2i, f: Vector2, first: bool) -> void:
+	if first or _last_cell.x < 0:
+		_last_cell = c
+		_down_cell = c
+		_stroke_links = 0
+		_stroke_best.clear()
+		_last_f = f
+		if world.can_move_node(c):
+			_stroke_best[c] = 9.0
+			_follow(c, f, f)
+		return
+	# Ignore a finger that only clips the corner of a neighbouring cell, so a
+	# diagonal stroke stays diagonal instead of gaining a kink.
+	var gap := c - _last_cell
+	if c != _last_cell and maxi(absi(gap.x), absi(gap.y)) == 1:
+		var off := f - Vector2(c)
+		if minf(minf(off.x, off.y), minf(1.0 - off.x, 1.0 - off.y)) < 0.16:
+			return
+	var touched: Array[Vector2i] = [_last_cell]
+	while _last_cell != c:
+		var step := _last_cell + (c - _last_cell).sign()
+		# A path drawn alongside a road hops onto the road, which makes a pavement.
+		var snapped := false
+		if World.TOOL_LINK.get(tool, -1) == L.PATH:
+			var on_road := _road_snap(_last_cell, step)
+			if on_road.x >= 0:
+				step = on_road
+				snapped = true
+		var free := world.can_move_node(step)
+		if not _draw_link(_last_cell, step):
+			# Refused (the message says why): stay put so the finger can
+			# carry on round the obstacle from the last good spot.
+			return
+		if free:
+			_stroke_best[step] = 9.0
+		_last_cell = step
+		touched.append(step)
+		if snapped and maxi(absi(step.x - c.x), absi(step.y - c.y)) <= 1:
+			break
+	for cell in touched:
+		if _stroke_best.has(cell):
+			_follow(cell, _last_f, f)
+	_last_f = f
+
+
+# When a path is being drawn from a road cell and the finger heads alongside
+# the road, returns the next road cell to hop onto (else (-1, -1)).
+func _road_snap(from: Vector2i, step: Vector2i) -> Vector2i:
+	var heading := Vector2(step - from)
+	if heading == Vector2.ZERO:
+		return Vector2i(-1, -1)
+	for e in world.adj.get(from, []):
+		if e[1] != L.ROAD:
+			continue
+		var n: Vector2i = e[0]
+		if world.fixed.has(world.key(from, n)) or maxi(absi(n.x - step.x), absi(n.y - step.y)) > 1:
+			continue
+		if heading.normalized().dot(Vector2(n - from).normalized()) >= 0.5:
+			return n
+	return Vector2i(-1, -1)
+
+
+# Moves a cell's node to where the finger's path came closest to its middle.
+func _follow(cell: Vector2i, f0: Vector2, f1: Vector2) -> void:
+	var centre := Vector2(cell) + Vector2(0.5, 0.5)
+	var q := Geometry2D.get_closest_point_to_segment(centre, f0, f1)
+	var off := q - Vector2(cell)
+	if off.x < 0.0 or off.y < 0.0 or off.x > 1.0 or off.y > 1.0:
+		return
+	var dist := q.distance_to(centre)
+	if dist < _stroke_best[cell] - 0.02:
+		_stroke_best[cell] = dist
+		world.set_offset(cell, off)
+		view.refresh(cell)
+
+
+func _end_stroke() -> void:
+	if tool == T.RESTORE and _restored[0] > 0:
+		_show_toast("Restored %d lengths of old canal for %d coins" % _restored)
+		_restored = [0, 0]
+	if not World.TOOL_LINK.has(tool) or _down_cell.x < 0:
+		return
+	var c := _down_cell
+	_down_cell = Vector2i(-1, -1)
+	if not world.adj.has(c):
+		world.offsets.erase(c)
+
+
+func _draw_link(a: Vector2i, b: Vector2i) -> bool:
+	if World.VERGE_TOOLS.has(tool):
+		var verr := world.add_verge(a, b, World.VERGE_TOOLS[tool])
+		if verr == "" or verr == "same":
+			view.refresh(b)
+			return true
+		_show_toast(verr)
+		return false
+	var type: int = World.TOOL_LINK[tool]
+	var style: String = World.TOOL_STYLE.get(tool, "")
+	var plan := world.check_link(a, b, type, style)
+	if plan.err == "same":
+		return true
+	if plan.err != "":
+		_show_toast(plan.err)
+		return false
+	world.add_link(a, b, type, style)
+	_stroke_links += 1
+	view.refresh(b)
+	if plan.cost >= World.BRIDGE_COST and type != L.CANAL and not plan.restore and world.has_bridge(b if world.has_water(b) else a):
+		_show_toast("Bridge built")
+	return true
+
+
+# --- Game events ------------------------------------------------------------
+
+func _refresh() -> void:
+	if mode == "menu":
+		return
+	_coins.text = str(world.coins)
+	var open := world.all_linked()
+	var n_places := world.places.size()
+	var goals := world.objectives()
+	var earned := world.stars()
+	for i in 3:
+		var bits := []
+		for it in goals[i].items:
+			bits.append("%s %d/%d" % [it.text, it.have, it.need])
+		_set_goal(i, i < earned, "  ·  ".join(bits))
+		_goal_stars[i].get_parent().visible = not world.unlimited
+	_finish_btn.visible = not world.unlimited
+	_finish_btn.disabled = not world.finished and world.live_stars() < 1
+	_finish_btn.text = "Results" if world.finished else "Finish level"
+	if world.net_version != _net_version:
+		# The water changed, so boats in transit may no longer have a route.
+		_net_version = world.net_version
+		view.clear_boats()
+		_next_boat = 0.8
+	var joined := world.linked > 1
+	if joined and not _was_joined:
+		_show_toast("Boats are coming through! Press Finish level when you're happy.")
+	_was_joined = joined
+	if _done.visible:
+		_fill_done_panel()
+
+
+func _set_goal(i: int, done: bool, text: String) -> void:
+	_goal_stars[i].filled = int(done)
+	_goal_labels[i].text = text
+
+
+func _on_boat_arrived() -> void:
+	if mode == "menu":
+		return
+	world.boat_arrived()
+	_coins.modulate = GOLD
+	create_tween().tween_property(_coins, "modulate", Color.WHITE, 0.8)
+	# Every goal met: the level ends by itself.
+	if not _celebrated and not world.unlimited and not world.finished and world.live_stars() == 3:
+		_celebrated = true
+		_on_finish()
+
+
+## Ends the level (or shows its results again), locking in the stars.
+func _on_finish() -> void:
+	if not world.finished and not world.finish():
+		_show_toast("Link the canals first - that earns the first star")
+		return
+	_fill_done_panel()
+	_done.show()
+	_record_result()
+
+
+func _fill_done_panel() -> void:
+	var stars := world.stars()
+	_done_stars.filled = stars
+	_done_title.text = ["", "The waterway is open!", "A well connected countryside!", "A perfect waterway!"][stars]
+	var lines := []
+	for g in world.objectives():
+		if g.done:
+			lines.append("%s - done" % g.title)
+		else:
+			var bits := []
+			for it in g.items:
+				if not it.done:
+					bits.append("%s %d/%d" % [it.text, it.have, it.need])
+			lines.append("%s - still needs %s" % [g.title, ", ".join(bits)])
+	if stars < 3:
+		lines.append("")
+		lines.append("Replay the level to earn the rest.")
+	if mode == "daily":
+		lines.append("Today's score: %d   (best %d)" % [world.score(), maxi(world.score(), _daily_score())])
+	_done_text.text = "\n".join(lines)
+	_done_next.text = "Next level" if mode == "journey" and level_idx < Levels.JOURNEY.size() - 1 else "Menu"
+
+
+func _daily_key() -> String:
+	return Time.get_date_string_from_system()
+
+
+func _daily_score() -> int:
+	return _save.get_value("daily", _daily_key(), 0)
+
+
+func _record_result() -> void:
+	if mode == "journey":
+		var k := str(level_idx)
+		_save.set_value("journey", k, maxi(_save.get_value("journey", k, 0), world.stars()))
+	elif mode == "daily":
+		_save.set_value("daily", _daily_key(), maxi(_daily_score(), world.score()))
+	_save.save(SAVE_PATH)
+
+
+func _on_done_next() -> void:
+	if mode == "journey" and level_idx < Levels.JOURNEY.size() - 1:
+		start_journey(level_idx + 1)
+	else:
+		show_menu()
+
+
+func _show_toast(text: String) -> void:
+	_toast_label.text = text
+	_toast.modulate.a = 1.0
+	_toast.show()
+	_toast.reset_size()
+	if _toast_tween:
+		_toast_tween.kill()
+	_toast_tween = create_tween()
+	_toast_tween.tween_interval(2.4)
+	_toast_tween.tween_property(_toast, "modulate:a", 0.0, 0.4)
+	_toast_tween.tween_callback(_toast.hide)
+
+
+## Picks a tool, or none (PAN) to move the map with one finger.
+func _select_tool(id: int) -> void:
+	if id == tool and id != T.PAN:
+		id = T.PAN          # tapping the chosen tool again puts it down
+	tool = id
+	view.hover = Vector2i(-1, -1)
+	view.show_derelict = tool == T.RESTORE
+	view.show_grid = tool != T.PAN
+	for b in _tool_buttons:
+		b.set_pressed_no_signal(b.tool_id == id)
+	if TOOL_HINTS.has(id) and mode != "menu":
+		_show_toast(TOOL_HINTS[id])
+
+
+## Opens a category's row of tools (or closes it, given -1 or the open one).
+func _open_category(i: int) -> void:
+	if i == category:
+		i = -1
+	category = i
+	for j in _cat_buttons.size():
+		_cat_buttons[j].set_pressed_no_signal(j == i)
+	for b in _tool_buttons:
+		if b.get_parent() == _sub_box:
+			_sub_box.remove_child(b)
+	if i < 0:
+		_sub_bar.hide()
+		_select_tool(T.PAN)
+		return
+	var first := -1
+	for b in _tool_buttons:
+		if b.get_meta("category") == i:
+			_sub_box.add_child(b)
+			if first < 0 and b.visible:
+				first = b.tool_id
+	_sub_bar.show()
+	_sub_bar.reset_size()
+	tool = T.PAN
+	_select_tool(first)
+
+
+func _category_of(id: int) -> int:
+	for b in _tool_buttons:
+		if b.tool_id == id:
+			return b.get_meta("category")
+	return -1
+
+
+func _refresh_menu() -> void:
+	for i in _level_stars.size():
+		_level_stars[i].filled = _save.get_value("journey", str(i), 0)
+	var best := _daily_score()
+	_daily_best.text = "Today's best: %d" % best if best > 0 else "A new map every day"
+
+
+# --- HUD construction -------------------------------------------------------
+
+func _build_overlay() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 1
+	add_child(layer)
+	var rect := ColorRect.new()
+	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var noise := FastNoiseLite.new()
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	noise.frequency = 0.012
+	noise.fractal_octaves = 4
+	var tex := NoiseTexture2D.new()
+	tex.width = 256
+	tex.height = 256
+	tex.seamless = true
+	tex.noise = noise
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://shaders/paper.gdshader")
+	mat.set_shader_parameter("noise", tex)
+	rect.material = mat
+	layer.add_child(rect)
+
+
+func _box(bg: Color, border: Color, radius: int, margin: int) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = border
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(radius)
+	sb.set_content_margin_all(margin)
+	return sb
+
+
+func _make_theme() -> Theme:
+	var th := Theme.new()
+	th.default_font = _font
+	th.default_font_size = 17
+	th.set_color("font_color", "Label", INK)
+	var panel := _box(CREAM, EDGE, 16, 12)
+	panel.shadow_color = Color(0.2, 0.15, 0.05, 0.2)
+	panel.shadow_size = 6
+	panel.shadow_offset = Vector2(0, 3)
+	th.set_stylebox("panel", "PanelContainer", panel)
+	th.set_stylebox("normal", "Button", _box(Color("efe1bd"), EDGE, 12, 8))
+	th.set_stylebox("hover", "Button", _box(Color("f4e9cc"), EDGE, 12, 8))
+	th.set_stylebox("pressed", "Button", _box(Color("cfe0b8"), Color("7c9f62"), 12, 8))
+	th.set_stylebox("focus", "Button", StyleBoxEmpty.new())
+	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		th.set_color(c, "Button", INK)
+	return th
+
+
+## Pins a control to a point of the screen (ax, ay in 0..1) and lets it grow
+## away from that point as its contents change.
+func _pin(ctrl: Control, ax: float, ay: float, offset: Vector2) -> void:
+	ctrl.anchor_left = ax
+	ctrl.anchor_right = ax
+	ctrl.anchor_top = ay
+	ctrl.anchor_bottom = ay
+	ctrl.offset_left = offset.x
+	ctrl.offset_right = offset.x
+	ctrl.offset_top = offset.y
+	ctrl.offset_bottom = offset.y
+	var grow := [Control.GROW_DIRECTION_END, Control.GROW_DIRECTION_BOTH, Control.GROW_DIRECTION_BEGIN]
+	ctrl.grow_horizontal = grow[int(round(ax * 2))]
+	ctrl.grow_vertical = grow[int(round(ay * 2))]
+
+
+func _label(text: String, font_size: int, color := INK) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", font_size)
+	l.add_theme_color_override("font_color", color)
+	return l
+
+
+func _button(text: String, on_press: Callable, min_size := Vector2(44, 40)) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = min_size
+	b.pressed.connect(on_press)
+	return b
+
+
+func _vbox(parent: Control, gap := 6) -> VBoxContainer:
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", gap)
+	parent.add_child(v)
+	return v
+
+
+func _hbox(parent: Control, gap := 8) -> HBoxContainer:
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", gap)
+	parent.add_child(h)
+	return h
+
+
+func _build_hud() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 2
+	add_child(layer)
+	_hud = Control.new()
+	_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.theme = _make_theme()
+	layer.add_child(_hud)
+
+	# Level title, top left.
+	var info := PanelContainer.new()
+	_hud.add_child(info)
+	_pin(info, 0, 0, Vector2(12, 12))
+	var info_box := _vbox(info)
+	var title_row := _hbox(info_box)
+	title_row.add_child(_button("Menu", show_menu))
+	_title = _label("", 22)
+	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_row.add_child(_title)
+	_new_land = _button("New land", func(): start_free(_free_seed + 1))
+	title_row.add_child(_new_land)
+	_blurb = _label("", 14, MUTED)
+	_blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_blurb.custom_minimum_size = Vector2(340, 0)
+	info_box.add_child(_blurb)
+
+	# Coins and goals, top right.
+	var stats := PanelContainer.new()
+	_hud.add_child(stats)
+	_pin(stats, 1, 0, Vector2(-12, 12))
+	var stats_box := _vbox(stats, 4)
+	var coin_row := _hbox(stats_box)
+	_coin_icon = CoinIcon.new()
+	coin_row.add_child(_coin_icon)
+	_coins = _label("0", 22)
+	_coins.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	coin_row.add_child(_coins)
+	coin_row.add_child(_button("Restart", _restart))
+	for i in 3:
+		var row := _hbox(stats_box)
+		var star := StarRow.new(18, 1)
+		row.add_child(star)
+		var lbl := _label("", 14)
+		lbl.custom_minimum_size = Vector2(250, 0)
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		row.add_child(lbl)
+		_goal_stars.append(star)
+		_goal_labels.append(lbl)
+	_finish_btn = _button("Finish level", _on_finish)
+	stats_box.add_child(_finish_btn)
+
+	# Build bar, bottom centre: categories, with the open one's tools above.
+	var bar := PanelContainer.new()
+	_hud.add_child(bar)
+	_pin(bar, 0.5, 1, Vector2(0, -8))
+	var bar_box := _hbox(bar, 2)
+	var clear_style := _box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 12, 4)
+	var hover_style := _box(Color("efe1bd"), Color(0, 0, 0, 0), 12, 4)
+	var on_style := _box(Color("cfe0b8"), Color("7c9f62"), 12, 4)
+	var styled := func(b: Button) -> void:
+		b.add_theme_stylebox_override("normal", clear_style)
+		b.add_theme_stylebox_override("hover", hover_style)
+		b.add_theme_stylebox_override("pressed", on_style)
+		b.add_theme_stylebox_override("hover_pressed", on_style)
+	for i in CATEGORIES.size():
+		var cat: Array = CATEGORIES[i]
+		var cb := ToolButton.new(cat[1], cat[0], "")
+		cb.custom_minimum_size = Vector2(118, 74)
+		styled.call(cb)
+		cb.pressed.connect(_open_category.bind(i))
+		bar_box.add_child(cb)
+		_cat_buttons.append(cb)
+		for def in cat[2]:
+			var b := ToolButton.new(def[0], def[1], def[2])
+			b.custom_minimum_size = Vector2(96, 88)
+			b.set_meta("category", i)
+			styled.call(b)
+			b.pressed.connect(_select_tool.bind(def[0]))
+			_tool_buttons.append(b)
+	_sub_bar = PanelContainer.new()
+	_hud.add_child(_sub_bar)
+	_pin(_sub_bar, 0.5, 1, Vector2(0, -98))
+	_sub_box = _hbox(_sub_bar, 2)
+	_sub_bar.hide()
+
+	# Camera buttons, right edge.
+	var cam := PanelContainer.new()
+	_hud.add_child(cam)
+	_pin(cam, 1, 0.5, Vector2(-12, -10))
+	var cam_box := _vbox(cam, 6)
+	var vp_mid := func() -> Vector2: return get_viewport_rect().size * 0.5
+	cam_box.add_child(_button("+", func(): _zoom_at(vp_mid.call(), 1.3), Vector2(46, 44)))
+	cam_box.add_child(_button("-", func(): _zoom_at(vp_mid.call(), 1.0 / 1.3), Vector2(46, 44)))
+	var centre_btn := _button("Fit", recentre, Vector2(46, 44))
+	centre_btn.add_theme_font_size_override("font_size", 14)
+	cam_box.add_child(centre_btn)
+	_camera_box = cam
+
+	# Toast, just above the toolbar.
+	_toast = PanelContainer.new()
+	_toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(_toast)
+	_pin(_toast, 0.5, 1, Vector2(0, -196))
+	_toast_label = _label("", 17)
+	_toast.add_child(_toast_label)
+	_toast.hide()
+	_game_ui = [info, stats, bar, cam]
+
+	# Level complete panel, centre.
+	_done = PanelContainer.new()
+	_hud.add_child(_done)
+	_pin(_done, 0.5, 0.5, Vector2.ZERO)
+	var done_box := _vbox(_done, 12)
+	_done_title = _label("", 28)
+	_done_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	done_box.add_child(_done_title)
+	_done_stars = StarRow.new(50)
+	_done_stars.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	done_box.add_child(_done_stars)
+	_done_text = _label("", 16, MUTED)
+	_done_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_done_text.custom_minimum_size = Vector2(400, 0)
+	done_box.add_child(_done_text)
+	var btn_row := _hbox(done_box, 12)
+	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	btn_row.add_child(_button("Free play", func(): _done.hide()))
+	btn_row.add_child(_button("Replay", func(): _restart()))
+	_done_next = _button("Next level", _on_done_next)
+	btn_row.add_child(_done_next)
+
+	_build_menu()
+
+
+func _restart() -> void:
+	match mode:
+		"journey": start_journey(level_idx)
+		"daily": start_daily()
+		"free": start_free(_free_seed)
+
+
+func _build_menu() -> void:
+	_menu = PanelContainer.new()
+	var style := _box(Color(0.97, 0.94, 0.85, 0.95), EDGE, 22, 28)
+	style.shadow_color = Color(0.2, 0.15, 0.05, 0.25)
+	style.shadow_size = 12
+	_menu.add_theme_stylebox_override("panel", style)
+	_hud.add_child(_menu)
+	_pin(_menu, 0.5, 0.5, Vector2.ZERO)
+	var stack := _vbox(_menu, 0)
+
+	_menu_home = _vbox(stack, 12)
+	var name_label := _label("Cozy Canals", 54)
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_menu_home.add_child(name_label)
+	var strap := _label("Restore the waterways of the English countryside", 16, MUTED)
+	strap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_menu_home.add_child(strap)
+	_menu_home.add_child(Control.new())
+	var stamp := _label(BuildInfo.STAMP, 12, MUTED)
+	stamp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var big := Vector2(380, 58)
+	_menu_home.add_child(_mode_button("Journey", "Ten waterways to restore, three stars each", big,
+		func(): _menu_home.hide(); _menu_levels.show()))
+	_menu_home.add_child(_mode_button("Daily Cut", "", big, start_daily))
+	_daily_best = _menu_home.get_child(_menu_home.get_child_count() - 1).get_meta("sub")
+	_menu_home.add_child(_mode_button("Free Build", "A wide open map, no budget, no goals", big,
+		func(): start_free(randi() % 100000)))
+	_menu_home.add_child(stamp)
+
+	_menu_levels = _vbox(stack, 14)
+	var heading := _label("Journey", 34)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_menu_levels.add_child(heading)
+	var grid := GridContainer.new()
+	grid.columns = 5
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	_menu_levels.add_child(grid)
+	for i in Levels.JOURNEY.size():
+		var b := _button("", start_journey.bind(i), Vector2(150, 96))
+		var inner := _vbox(b, 4)
+		inner.set_anchors_preset(Control.PRESET_FULL_RECT)
+		inner.alignment = BoxContainer.ALIGNMENT_CENTER
+		inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var num := _label(str(i + 1), 24)
+		num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		inner.add_child(num)
+		var nm := _label(Levels.JOURNEY[i].name, 13, MUTED)
+		nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		inner.add_child(nm)
+		var stars := StarRow.new(15)
+		stars.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		inner.add_child(stars)
+		_level_stars.append(stars)
+		grid.add_child(b)
+	var back := _button("Back", func(): _menu_levels.hide(); _menu_home.show())
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_menu_levels.add_child(back)
+
+
+func _mode_button(text: String, sub: String, min_size: Vector2, on_press: Callable) -> Button:
+	var b := _button("", on_press, min_size)
+	var inner := _vbox(b, 0)
+	inner.set_anchors_preset(Control.PRESET_FULL_RECT)
+	inner.alignment = BoxContainer.ALIGNMENT_CENTER
+	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var head := _label(text, 22)
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(head)
+	var sub_label := _label(sub, 13, MUTED)
+	sub_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(sub_label)
+	b.set_meta("sub", sub_label)
+	return b
